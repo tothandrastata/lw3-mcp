@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install)",
+      "Bash(npx @modelcontextprotocol/inspector node src/index.js)",
+      "Bash(npx @modelcontextprotocol/inspector node src/index.js --port 6280)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :6277)",
+      "Bash(taskkill /PID 1732 /F)",
+      "Bash(cmd //c \"taskkill /PID 1732 /F\")",
+      "Bash(findstr :6274)",
+      "Bash(cmd //c \"taskkill /PID 11948 /F\")",
+      "Bash(cmd //c \"start http://localhost:6274/?MCP_PROXY_AUTH_TOKEN=aadb6e92b284d08bb78dd76e33ba27108cd69450d0ad5dea7ef0085b7c173aa9\")",
+      "Bash(findstr \":6277 :6274\")",
+      "Bash(cmd //c \"taskkill /PID 24932 /F && taskkill /PID 31000 /F && taskkill /PID 23572 /F\")",
+      "Bash(cmd //c \"start http://localhost:6274/?MCP_PROXY_AUTH_TOKEN=238d8285f7c9a8dcbc6f98dd1e142d795e5e961bc6ce4b57763af05e642d1d5c\")",
+      "Bash(cmd //c \"taskkill /PID 32748 /F && taskkill /PID 32328 /F\")",
+      "Bash(cmd //c \"start http://localhost:6274/?MCP_PROXY_AUTH_TOKEN=d12ffc2eaa2879e946a0121a0d59f5b48c60f287a0838215fd5e319b134bf94d\")",
+      "Bash(node test-connection.js)",
+      "Bash(cmd //c \"taskkill /PID 26756 /F & taskkill /PID 9052 /F & taskkill /PID 32028 /F\")",
+      "Bash(cmd //c \"start http://localhost:6274/?MCP_PROXY_AUTH_TOKEN=39c7d839d2515ae00bc21f80c1d2f5a4ac75ba9c973fd1656853409e7a0b8e30\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
