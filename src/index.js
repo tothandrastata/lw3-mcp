@@ -380,9 +380,10 @@ class LW3MCPServer {
 
     // Construct method with parameters if provided
     // e.g., switchAll + F49 -> switchAll(F49)
-    const methodWithParams = params ? `${method}(${params})` : method;
+    // Always include parentheses for method calls
+    const methodWithParams = params ? `${method}(${params})` : `${method}()`;
 
-    // Construct full path: /V1/EDID:switchAll(F49)
+    // Construct full path: /V1/EDID:switchAll(F49) or /V1/EDID:methodName()
     const fullPath = `${nodepath}:${methodWithParams}`;
     const response = await this.lw3.call(fullPath, []);
 
