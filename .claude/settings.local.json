@@ -18,7 +18,10 @@
       "Bash(cmd //c \"start http://localhost:6274/?MCP_PROXY_AUTH_TOKEN=d12ffc2eaa2879e946a0121a0d59f5b48c60f287a0838215fd5e319b134bf94d\")",
       "Bash(node test-connection.js)",
       "Bash(cmd //c \"taskkill /PID 26756 /F & taskkill /PID 9052 /F & taskkill /PID 32028 /F\")",
-      "Bash(cmd //c \"start http://localhost:6274/?MCP_PROXY_AUTH_TOKEN=39c7d839d2515ae00bc21f80c1d2f5a4ac75ba9c973fd1656853409e7a0b8e30\")"
+      "Bash(cmd //c \"start http://localhost:6274/?MCP_PROXY_AUTH_TOKEN=39c7d839d2515ae00bc21f80c1d2f5a4ac75ba9c973fd1656853409e7a0b8e30\")",
+      "Bash(dir \"C:\\Taurus\\LARA\\lara-builder\\ai-agent-app\\poc\" /b)",
+      "Bash(npm install:*)",
+      "Bash(cmd //c \"start http://localhost:6274/?MCP_PROXY_AUTH_TOKEN=4d5744795ff8ccc30a85fdd9722bccdbc6b92cb14960221b888c197964c79155\")"
     ],
     "deny": [],
     "ask": []

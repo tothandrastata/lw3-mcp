@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **[src/index.js](src/index.js)**: Main MCP server implementation
   - Handles MCP tool registration and requests
   - Manages the persistent LW3 connection
-  - Implements 10 MCP tools with separated nodepath/property parameters
+  - Implements 11 MCP tools with separated nodepath/property parameters
 
 - **[src/lw3-protocol.js](src/lw3-protocol.js)**: LW3 protocol handler
   - Manages TCP socket connection to Lightware devices (default port 6107)
@@ -21,6 +21,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - Handles line-based message parsing
   - Manages command queue with timeouts
   - Parses and structures GETALL responses
+
+- **[src/lightware-discovery.js](src/lightware-discovery.js)**: mDNS device discovery
+  - Discovers Lightware devices on the local network using multicast DNS
+  - Queries for common Lightware service types (_lwr3, _lara-https, _webldc-http, _rest-http)
+  - Extracts device information (model name, serial number, IP address, hostname)
+  - Based on POC implementation from lara-builder/ai-agent-app/poc/mdns-discovery
 
 ### Design Patterns
 
@@ -32,15 +38,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Available MCP Tools
 
+### Device Discovery
+
+1. **discover** - Discover Lightware devices on the local network
+   - Parameters: `timeout` (optional, default: 3000ms)
+   - Returns: JSON array of discovered devices with modelName, serialNumber, ipAddress, hostname
+   - Uses mDNS to find devices advertising Lightware service types
+
 ### Connection Management
 
-1. **connect** - Establish connection to a Lightware device
+2. **connect** - Establish connection to a Lightware device
    - Parameters: `host` (required), `port` (optional, default: 6107)
 
-2. **disconnect** - Close connection to the device
+3. **disconnect** - Close connection to the device
    - Parameters: none
 
-3. **status** - Get current connection status
+4. **status** - Get current connection status
    - Parameters: none
    - Returns: connection info (host, port, connected status)
 
@@ -48,43 +61,43 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 All commands use **separated parameters** for better usability:
 
-4. **GET** - Read a property value
+5. **GET** - Read a property value
    - Parameters:
      - `nodepath` (required): e.g., `/V1/EDID`
      - `property` (required): e.g., `EdidStatus`
    - Constructs: `GET /V1/EDID.EdidStatus`
 
-5. **SET** - Set a property value
+6. **SET** - Set a property value
    - Parameters:
      - `nodepath` (required): e.g., `/V1/MANAGEMENT/NETWORK`
      - `property` (required): e.g., `HostName`
      - `value` (required): e.g., `jimmy-hc40`
    - Constructs: `SET /V1/MANAGEMENT/NETWORK.HostName=jimmy-hc40`
 
-6. **GETALL** - Get all child nodes, properties, and methods of a node
+7. **GETALL** - Get all child nodes, properties, and methods of a node
    - Parameters:
      - `path` (required): node path, e.g., `/V1/MANAGEMENT/NETWORK`
    - Returns: Structured JSON with separated nodepath/property fields
    - Timeout: 1 second to collect all responses
 
-7. **GETROOT** - Get root structure (convenience wrapper for GETALL /V1/*)
+8. **GETROOT** - Get root structure (convenience wrapper for GETALL /V1/*)
    - Parameters: none
    - Returns: Same structured JSON as GETALL
 
-8. **CALL** - Execute a method
+9. **CALL** - Execute a method
    - Parameters:
      - `nodepath` (required): e.g., `/V1/EDID`
      - `method` (required): e.g., `switchAll`
      - `params` (optional): e.g., `F49`
    - Constructs: `CALL /V1/EDID:switchAll(F49)`
 
-9. **OPEN** - Open a subscription to a property
-   - Parameters:
-     - `nodepath` (required): e.g., `/V1/EDID`
-     - `property` (required): e.g., `EdidStatus`
-   - Constructs: `OPEN /V1/EDID.EdidStatus`
+10. **OPEN** - Open a subscription to a property
+    - Parameters:
+      - `nodepath` (required): e.g., `/V1/EDID`
+      - `property` (required): e.g., `EdidStatus`
+    - Constructs: `OPEN /V1/EDID.EdidStatus`
 
-10. **MAN** - Get manual/documentation
+11. **MAN** - Get manual/documentation
     - Parameters:
       - `nodepath` (required): e.g., `/V1/MEDIA/VIDEO/O1`
       - `item` (required): property or method name, e.g., `Output5VMode`
@@ -196,27 +209,42 @@ Add to your Claude Desktop MCP configuration:
 
 ## Example Usage Flow
 
-1. **Connect to device:**
+1. **Discover devices on the network:**
+   ```
+   Tool: discover
+   Parameters: { "timeout": 3000 }
+   Returns: [
+     {
+       "modelName": "UCX-4x3-HC40",
+       "serialNumber": "D4349200",
+       "ipAddress": "192.168.2.109",
+       "hostname": "jimmy-hc40.local"
+     },
+     ...
+   ]
+   ```
+
+2. **Connect to device:**
    ```
    Tool: connect
    Parameters: { "host": "jimmy-hc40.local" }
    ```
 
-2. **Get root structure:**
+3. **Get root structure:**
    ```
    Tool: GETROOT
    Parameters: {}
    Returns: JSON with all root properties, nodes, and methods
    ```
 
-3. **Read a property:**
+4. **Read a property:**
    ```
    Tool: GET
    Parameters: { "nodepath": "/V1/EDID", "property": "EdidStatus" }
    Returns: "D1:E1;D1:E2;D1:E3;D1:E4"
    ```
 
-4. **Set a property:**
+5. **Set a property:**
    ```
    Tool: SET
    Parameters: {
@@ -226,7 +254,7 @@ Add to your Claude Desktop MCP configuration:
    }
    ```
 
-5. **Call a method:**
+6. **Call a method:**
    ```
    Tool: CALL
    Parameters: {
@@ -237,7 +265,7 @@ Add to your Claude Desktop MCP configuration:
    Constructs: CALL /V1/EDID:switchAll(F49)
    ```
 
-6. **Get documentation:**
+7. **Get documentation:**
    ```
    Tool: MAN
    Parameters: {

@@ -7,6 +7,7 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { LW3Protocol } from './lw3-protocol.js';
+import { LightwareDiscovery } from './lightware-discovery.js';
 
 /**
  * MCP Server for Lightware LW3 Protocol Gateway
@@ -214,6 +215,20 @@ class LW3MCPServer {
             properties: {},
           },
         },
+        {
+          name: 'discover',
+          description: 'Discover Lightware devices on the local network using mDNS',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              timeout: {
+                type: 'number',
+                description: 'Discovery timeout in milliseconds (default: 3000)',
+                default: 3000,
+              },
+            },
+          },
+        },
       ],
     }));
 
@@ -252,6 +267,9 @@ class LW3MCPServer {
 
           case 'status':
             return await this.handleStatus();
+
+          case 'discover':
+            return await this.handleDiscover(args);
 
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -454,6 +472,46 @@ class LW3MCPServer {
         },
       ],
     };
+  }
+
+  async handleDiscover(args) {
+    const { timeout = 3000 } = args;
+
+    const discovery = new LightwareDiscovery();
+
+    try {
+      const devices = await discovery.discover(timeout);
+
+      if (devices.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'No Lightware devices found on the network',
+            },
+          ],
+        };
+      }
+
+      // Format devices as JSON for easy parsing
+      const devicesJson = devices.map(device => ({
+        modelName: device.modelName,
+        serialNumber: device.serialNumber,
+        ipAddress: device.ipAddress,
+        hostname: device.hostname
+      }));
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Found ${devices.length} Lightware device(s):\n\n${JSON.stringify(devicesJson, null, 2)}`,
+          },
+        ],
+      };
+    } finally {
+      discovery.stopDiscovery();
+    }
   }
 
   ensureConnected() {
