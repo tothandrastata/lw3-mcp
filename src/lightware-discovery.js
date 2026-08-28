@@ -2,6 +2,102 @@ import mdns from 'multicast-dns';
 import { EventEmitter } from 'events';
 
 /**
+ * Service types Lightware devices are known to advertise. Both the plain and the
+ * secure variants: a device with its HTTP service disabled publishes only the
+ * -https/-wss forms, and querying just the plain ones makes it invisible.
+ */
+export const KNOWN_SERVICE_TYPES = [
+  '_lwr3._tcp.local',
+  '_lwr3-wss._tcp.local',
+  '_lara-https._tcp.local',
+  '_webldc-http._tcp.local',
+  '_webldc-https._tcp.local',
+  '_rest-http._tcp.local',
+  '_rest-https._tcp.local',
+  '_update-rest-https._tcp.local',
+];
+
+/** The meta-query returns every service type on the network; keep the Lightware ones. */
+export const LIGHTWARE_SERVICE = /^_(lwr3|lara|webldc|rest|update-rest|serial\d)/;
+
+/** The standard DNS-SD query that enumerates a network's service types. */
+export const SERVICE_ENUMERATION = '_services._dns-sd._udp.local';
+
+/**
+ * Which service types to query: the known list, plus anything Lightware-looking
+ * the network told us about. Either source alone can miss a device — a new
+ * firmware name, or a device that ignores the meta-query — so both are used.
+ */
+export function lightwareServiceTypes(enumerated = []) {
+  const discovered = enumerated.filter((t) => LIGHTWARE_SERVICE.test(t));
+  return [...new Set([...KNOWN_SERVICE_TYPES, ...discovered])];
+}
+
+/** The instance label: everything before the first dot. */
+export function instanceLabel(name) {
+  return String(name).split('.')[0];
+}
+
+/**
+ * Read "PRODUCT-NAME SERIALNUMBER" out of an instance name.
+ * Returns null for any other shape — the caller reports the device anyway.
+ */
+export function parseLightwareName(name) {
+  const match = instanceLabel(name).match(/^([\w-]+)\s+([A-F0-9]+)$/i);
+  return match ? { product: match[1], serial: match[2] } : null;
+}
+
+/**
+ * Accumulates mDNS records into devices.
+ *
+ * Instances are keyed by their label, so one device advertising several service
+ * types is one entry. Addresses are kept separately and joined at list() time,
+ * which makes record arrival order irrelevant — the previous implementation only
+ * matched an address to a device if the A record arrived after the SRV.
+ */
+export class DeviceRegistry {
+  constructor() {
+    this.instances = new Map(); // label -> { modelName, serialNumber, hostname }
+    this.addresses = new Map(); // hostname -> ipAddress
+  }
+
+  noteInstance(instanceName) {
+    const label = instanceLabel(instanceName);
+    if (!label) return;
+    const parsed = parseLightwareName(instanceName);
+    const entry = this.instances.get(label) || {
+      modelName: null,
+      serialNumber: null,
+      hostname: null,
+    };
+    if (parsed) {
+      entry.modelName = parsed.product;
+      entry.serialNumber = parsed.serial;
+    }
+    this.instances.set(label, entry);
+  }
+
+  noteHostname(instanceName, hostname) {
+    this.noteInstance(instanceName);
+    const entry = this.instances.get(instanceLabel(instanceName));
+    if (entry) entry.hostname = hostname;
+  }
+
+  noteAddress(hostname, ipAddress) {
+    this.addresses.set(hostname, ipAddress);
+  }
+
+  list() {
+    return [...this.instances.values()].map((entry) => ({
+      modelName: entry.modelName,
+      serialNumber: entry.serialNumber,
+      ipAddress: entry.hostname ? this.addresses.get(entry.hostname) ?? null : null,
+      hostname: entry.hostname,
+    }));
+  }
+}
+
+/**
  * Lightware device discovery using mDNS
  * Based on the POC implementation
  */
@@ -94,7 +190,7 @@ export class LightwareDiscovery extends EventEmitter {
     for (const record of allRecords) {
       // PTR record contains service instance name
       if (record.type === 'PTR' && record.data) {
-        const parsed = this.parseLightwareName(record.data);
+        const parsed = parseLightwareName(record.data);
         if (parsed) {
           const key = `${parsed.product}_${parsed.serial}`;
           const temp = this.tempDevices.get(key) || {};
@@ -108,7 +204,7 @@ export class LightwareDiscovery extends EventEmitter {
       if (record.type === 'SRV' && record.data) {
         const hostname = record.data.target;
         const instanceName = record.name;
-        const parsed = this.parseLightwareName(instanceName);
+        const parsed = parseLightwareName(instanceName);
 
         if (parsed) {
           const key = `${parsed.product}_${parsed.serial}`;
@@ -150,27 +246,6 @@ export class LightwareDiscovery extends EventEmitter {
         }
       }
     }
-  }
-
-  /**
-   * Parse Lightware device name from mDNS service instance
-   * Format: "PRODUCT-NAME SERIALNUMBER" or just the service instance prefix
-   */
-  parseLightwareName(name) {
-    // Remove service type suffix if present (e.g., "._lwr3._tcp.local")
-    const cleanName = name.split('.')[0];
-
-    // Match pattern: "PRODUCT-NAME SERIALNUMBER"
-    // Examples: "UCX-4x2-HC30 00001234", "TPN-CTU-X50 00008839"
-    const match = cleanName.match(/^([\w-]+)\s+([A-F0-9]+)$/i);
-    if (match) {
-      return {
-        product: match[1],
-        serial: match[2]
-      };
-    }
-
-    return null;
   }
 
   /**
