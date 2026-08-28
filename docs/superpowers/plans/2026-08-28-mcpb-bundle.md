@@ -429,20 +429,25 @@ git commit -m "Add bundle verifier that unpacks and runs the packed server"
 Create `.mcpbignore`:
 
 ```
-.git/
-.claude/
-docs/
-dist/
-tests/
-scripts/
-assets/icon.svg
-logo.svg
-cursor_config.json
-CLAUDE.md
-.mcpbignore
+/.git/
+/.claude/
+/.superpowers/
+/docs/
+/dist/
+/tests/
+/scripts/
+/assets/icon.svg
+/logo.svg
+/cursor_config.json
+/CLAUDE.md
+/.mcpbignore
 ```
 
 `node_modules/` is deliberately absent from this list: the dependencies must ship. `tests/` and `scripts/` are build-time only.
+
+**Every pattern must be anchored with a leading `/`.** These are gitignore-style patterns, so an unanchored one matches at any depth. An unanchored `dist/` strips every `node_modules/**/dist`, including the MCP SDK's compiled JavaScript, which produces a bundle that installs and then fails to launch. Anchoring is not stylistic here.
+
+`/.superpowers/` excludes the subagent-driven-development workspace (task briefs, review diffs, the progress ledger). Without it those internal working documents ship to every person who installs the bundle.
 
 - [ ] **Step 2: Write the build script**
 
