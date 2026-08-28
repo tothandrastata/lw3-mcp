@@ -29,11 +29,24 @@ const videoLines = [
   'pw /V1/MEDIA/VIDEO/O2.Name=HDMI out 2',
 ];
 
-const switchableLines = ['O1', 'O2'].flatMap((o) =>
-  ['0=OK', 'I1=Busy', 'I2=OK', 'I3=OK', 'I4=OK', 'I5=OK'].map(
-    (kv) => `pr /V1/MEDIA/VIDEO/XP/${o}/SWITCHABLE.${kv}`
-  )
-);
+// Not a verbatim capture, unlike the arrays above: transcribed from ten
+// consecutive reads on a UCX-4x2-HC30 over seven seconds (I5 routed to both
+// outputs throughout), stable every time. Switchability is not uniform across
+// destinations - O1 refuses I1, O2 allows it.
+const switchableLines = [
+  'pr /V1/MEDIA/VIDEO/XP/O1/SWITCHABLE.0=OK',
+  'pr /V1/MEDIA/VIDEO/XP/O1/SWITCHABLE.I1=Busy',
+  'pr /V1/MEDIA/VIDEO/XP/O1/SWITCHABLE.I2=OK',
+  'pr /V1/MEDIA/VIDEO/XP/O1/SWITCHABLE.I3=OK',
+  'pr /V1/MEDIA/VIDEO/XP/O1/SWITCHABLE.I4=OK',
+  'pr /V1/MEDIA/VIDEO/XP/O1/SWITCHABLE.I5=OK',
+  'pr /V1/MEDIA/VIDEO/XP/O2/SWITCHABLE.0=OK',
+  'pr /V1/MEDIA/VIDEO/XP/O2/SWITCHABLE.I1=OK',
+  'pr /V1/MEDIA/VIDEO/XP/O2/SWITCHABLE.I2=OK',
+  'pr /V1/MEDIA/VIDEO/XP/O2/SWITCHABLE.I3=OK',
+  'pr /V1/MEDIA/VIDEO/XP/O2/SWITCHABLE.I4=OK',
+  'pr /V1/MEDIA/VIDEO/XP/O2/SWITCHABLE.I5=OK',
+];
 
 const grid = () => buildGrid({ xpLines, videoLines, switchableLines });
 
@@ -82,7 +95,32 @@ test('switchability is read per destination', () => {
   const g = grid();
   assert.equal(g.switchable.O1.I1, 'Busy');
   assert.equal(g.switchable.O1.I2, 'OK');
-  assert.equal(g.switchable.O2.I1, 'Busy');
+  assert.equal(g.switchable.O2.I1, 'OK');
+});
+
+test('the same source is Busy on one destination and OK on another, per cellState', () => {
+  const g = grid();
+  assert.equal(g.switchable.O1.I1, 'Busy');
+  assert.equal(g.switchable.O2.I1, 'OK', 'switchability is not uniform across destinations');
+
+  const onO1 = cellState(g, 'O1', 'I1');
+  assert.equal(onO1.enabled, false);
+  assert.equal(onO1.reason, 'Busy');
+
+  const onO2 = cellState(g, 'O2', 'I1');
+  assert.equal(onO2.enabled, true);
+  assert.equal(onO2.reason, null);
+});
+
+test('a known destination missing a source from its SWITCHABLE map reads Unavailable', () => {
+  const g = buildGrid({
+    xpLines: ['pw /V1/MEDIA/VIDEO/XP/O1.Lock=false'],
+    videoLines: [],
+    switchableLines: ['pr /V1/MEDIA/VIDEO/XP/O1/SWITCHABLE.I2=OK'],
+  });
+  const c = cellState(g, 'O1', 'I1');
+  assert.equal(c.enabled, false);
+  assert.equal(c.reason, 'Unavailable', 'a known destination with no entry for this source is not the same as an unknown destination');
 });
 
 test('the currently routed cell is selected', () => {
