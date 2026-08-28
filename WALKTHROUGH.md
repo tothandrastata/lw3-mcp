@@ -1,5 +1,15 @@
 # Installing the Lightware LW3 Gateway — picture guide
 
+<style>
+/* Print / HTML-export only. GitHub strips <style>, so this is a no-op there. */
+.page-break { break-after: page; page-break-after: always; }
+@media print {
+  h2 { break-after: avoid; page-break-after: avoid; }
+  img, blockquote { break-inside: avoid; page-break-inside: avoid; }
+  a { color: inherit; text-decoration: underline; }
+}
+</style>
+
 For anyone who would rather see it than read it. Takes about two minutes.
 
 If you are comfortable with software installs, [INSTALL.md](INSTALL.md) says the
@@ -17,6 +27,8 @@ broadcast to the wrong place.
 
 ---
 
+<div class="page-break"></div>
+
 ## Step 1 — Download the file
 
 Click here:
@@ -28,32 +40,27 @@ Your browser saves `lw3-mcp.mcpb` to your Downloads folder.
 > **If your browser warns you about the file**, that is expected. It is an
 > unfamiliar file type, not a dangerous one. Choose *Keep* or *Download anyway*.
 
-![Screenshot 1: the browser download bar showing lw3-mcp.mcpb, with the Keep option visible](assets/screenshots/01-download.png)
-
 ---
+
+<div class="page-break"></div>
 
 ## Step 2 — Open Claude Desktop's settings
 
 Open Claude Desktop. Click the **gear icon** to open Settings.
 
-![Screenshot 2: Claude Desktop with the Settings gear circled](assets/screenshots/02-settings.png)
-
----
-
-## Step 3 — Go to Extensions
-
 In the Settings window, choose **Extensions** from the list on the left.
 
-![Screenshot 3: the Settings window with Extensions selected in the sidebar](assets/screenshots/03-extensions.png)
+![Claude Desktop with the Settings gear circled](assets/screenshots/02-settings.png)
 
----
 
-## Step 4 — Drag the file in
+<div class="page-break"></div>
+
+## Step 3 — Drag the file in
 
 Open your Downloads folder next to the Claude Desktop window. Drag
 `lw3-mcp.mcpb` out of Downloads and drop it onto the Extensions page.
 
-![Screenshot 4: dragging the file from Explorer onto the Extensions pane](assets/screenshots/04-drag.png)
+![Dragging the file from Explorer onto the Extensions pane](assets/screenshots/04-drag.png)
 
 > **If nothing happens when you drop it**, look on the Extensions page for a
 > button that installs an extension from a file, and use that to pick
@@ -61,24 +68,19 @@ Open your Downloads folder next to the Claude Desktop window. Drag
 
 ---
 
-## Step 5 — Confirm
+<div class="page-break"></div>
 
-Claude Desktop asks you to confirm. Accept it.
+## Step 4 — Configure permissions
 
-![Screenshot 5: the install confirmation prompt](assets/screenshots/05-confirm.png)
+You can avoid allowance of each tool (GET / SET / CALL / ...) separately by allowing all:
 
----
-
-## Step 6 — Check that it worked
-
-**Lightware LW3 Gateway** now appears in your Extensions list with a version
-number next to it. That is the whole installation.
-
-![Screenshot 6: the Extensions list showing Lightware LW3 Gateway installed](assets/screenshots/06-installed.png)
+![Allow all tools of the extension](assets/screenshots/05-confirm.png)
 
 ---
 
-## Step 7 — Try it
+<div class="page-break"></div>
+
+## Step 5 — Try it
 
 Start a new chat and type:
 
@@ -87,17 +89,17 @@ Start a new chat and type:
 Claude replies with the devices it found — model name, serial number, and IP
 address for each one.
 
-![Screenshot 7: a chat showing the discover result with a device listed](assets/screenshots/07-first-use.png)
+![A chat showing the discover result with a device listed](assets/screenshots/07-first-use.png)
 
 Then connect to one and ask for whatever you need:
 
-> Connect to 192.168.2.109
->
-> Show me the root structure
->
-> What is the hostname of this device?
+
+![A chat showing the video input status if the discovered device](assets/screenshots/08-videostatus.png)
+
 
 ---
+
+<div class="page-break"></div>
 
 ## If something goes wrong
 
