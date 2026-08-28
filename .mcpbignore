@@ -1,0 +1,13 @@
+/.git/
+/.claude/
+/.superpowers/
+/docs/
+/dist/
+/tests/
+/scripts/
+/assets/icon.svg
+/logo.svg
+/cursor_config.json
+/CLAUDE.md
+/README.md
+/.mcpbignore

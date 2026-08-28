@@ -1,0 +1,36 @@
+{
+  "manifest_version": "0.2",
+  "name": "lw3-mcp",
+  "display_name": "Lightware LW3 Gateway",
+  "version": "1.0.0",
+  "description": "Discover and control Lightware devices over the LW3 protocol",
+  "author": { "name": "Andras Toth", "email": "andras.toth@lightware.com" },
+  "icon": "assets/icon.png",
+  "license": "MIT",
+  "keywords": ["lightware", "lw3", "av", "matrix", "mdns"],
+  "server": {
+    "type": "node",
+    "entry_point": "src/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/src/index.js"]
+    }
+  },
+  "tools": [
+    { "name": "discover", "description": "Discover Lightware devices on the local network using mDNS" },
+    { "name": "connect", "description": "Connect to a Lightware device using LW3 protocol" },
+    { "name": "disconnect", "description": "Disconnect from the current Lightware device" },
+    { "name": "status", "description": "Get the current connection status" },
+    { "name": "GET", "description": "Read a property value from the connected Lightware device" },
+    { "name": "SET", "description": "Set a property value on the connected Lightware device" },
+    { "name": "GETALL", "description": "Get all child nodes, properties and methods of a node" },
+    { "name": "GETROOT", "description": "Get root structure of the device (equivalent to GETALL /V1/*)" },
+    { "name": "CALL", "description": "Execute a method on the connected Lightware device" },
+    { "name": "OPEN", "description": "Open a subscription to a property on the connected Lightware device" },
+    { "name": "MAN", "description": "Get manual/documentation for a property or method" }
+  ],
+  "compatibility": {
+    "platforms": ["win32", "darwin", "linux"],
+    "runtimes": { "node": ">=18.0.0" }
+  }
+}
