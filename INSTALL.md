@@ -14,10 +14,15 @@ devices over LW3.
 
 ## Install
 
-1. Download `lw3-mcp-<version>.mcpb`.
+1. Download the bundle:
+   **https://github.com/tothandrastata/lw3-mcp/releases/latest/download/lw3-mcp.mcpb**
 2. Open Claude Desktop and go to **Settings > Extensions**.
-3. Drag the `.mcpb` file onto that window.
+3. Drag the downloaded `lw3-mcp.mcpb` onto that window.
 4. Confirm the install prompt.
+
+That link always serves the newest release. To pin a specific version instead,
+take it from the [releases page](https://github.com/tothandrastata/lw3-mcp/releases)
+— for example `.../releases/download/v1.0.0/lw3-mcp.mcpb`.
 
 ## First use
 
@@ -53,10 +58,12 @@ Confirm LW3 is enabled on the device.
 
 ## Updating
 
-Bundles do not update themselves. Download the newer `.mcpb` and drag it in
-again; it replaces the installed version.
+Bundles do not update themselves. Download from the same link again and drag it
+in; it replaces the installed version.
 
 ## Which version am I running?
 
-Settings > Extensions lists the installed version. Compare it against the
-filename on the file server.
+Settings > Extensions lists the installed version. Compare it against the newest
+tag on the [releases page](https://github.com/tothandrastata/lw3-mcp/releases).
+The downloaded file is named `lw3-mcp.mcpb` with no version in it, so the
+Extensions pane is the reliable place to check.

@@ -6,7 +6,11 @@ Ships two ways: as an installable bundle for people who just want the tools, and
 
 ## Install the bundle (most people)
 
-The server is packaged as an `.mcpb` [MCP Bundle](#building-the-bundle). Download `lw3-mcp-<version>.mcpb`, drag it into Claude Desktop's **Settings → Extensions**, and you're done — no Node.js, no npm, no editing `claude_desktop_config.json`. Claude Desktop runs the server with its own bundled runtime.
+The server is packaged as an `.mcpb` [MCP Bundle](#building-the-bundle).
+
+**[⬇ Download the latest release](https://github.com/tothandrastata/lw3-mcp/releases/latest/download/lw3-mcp.mcpb)**
+
+Drag the downloaded file into Claude Desktop's **Settings → Extensions** and you're done — no Node.js, no npm, no editing `claude_desktop_config.json`. Claude Desktop runs the server with its own bundled runtime. Older versions are on the [releases page](https://github.com/tothandrastata/lw3-mcp/releases).
 
 **[INSTALL.md](INSTALL.md)** is the guide for that audience; it ships next to the `.mcpb` on the file server.
 
@@ -63,9 +67,21 @@ You can re-run that check against any bundle on its own:
 node scripts/verify-bundle.js dist/lw3-mcp-1.0.0.mcpb
 ```
 
-### Distributing
+### Publishing a release
 
-Upload two files to the file server: the `.mcpb` and [INSTALL.md](INSTALL.md). Bundles do not self-update, so a new version means republishing the file and telling people to drag in the newer one.
+Distribution is GitHub Releases. To cut a new one:
+
+1. Bump the version in `package.json` **and** `manifest.json`, then `npm run bundle`
+2. Copy the output to a version-less name as well: `cp dist/lw3-mcp-<version>.mcpb dist/lw3-mcp.mcpb`
+3. Draft a release at [releases/new](https://github.com/tothandrastata/lw3-mcp/releases/new), tag it `v<version>`, and attach both files
+
+Attaching the version-less copy is what keeps this URL working forever:
+
+```
+https://github.com/tothandrastata/lw3-mcp/releases/latest/download/lw3-mcp.mcpb
+```
+
+It is the link in this README and in [INSTALL.md](INSTALL.md), so it must not break. Bundles do not self-update — a new release means people drag in the newer file themselves.
 
 ### Changing the version
 
