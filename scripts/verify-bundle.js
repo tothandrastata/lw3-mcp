@@ -5,7 +5,13 @@ import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 
 const MCPB = '@anthropic-ai/mcpb@2.1.2';
-const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+const isWin = process.platform === 'win32';
+const npx = isWin ? 'npx.cmd' : 'npx';
+
+// Node 20.12+ refuses to spawn .cmd/.bat without shell:true (the
+// CVE-2024-27980 hardening), and shell:true routes through cmd.exe, which
+// splits arguments on spaces. So on Windows: shell on, path arguments quoted.
+const quoteArg = (arg) => (isWin ? `"${arg}"` : arg);
 
 export const REQUIRED_ENTRIES = [
   'manifest.json',
@@ -58,18 +64,30 @@ function listTools(entryPoint) {
     const child = spawn(process.execPath, [entryPoint], { stdio: ['pipe', 'pipe', 'pipe'] });
     let buf = '';
     let stderr = '';
+    let settled = false;
     const timer = setTimeout(() => {
+      settled = true;
       child.kill();
       reject(new Error(`Server did not answer tools/list within 15s. stderr:\n${stderr}`));
     }, 15000);
 
+    const doResolve = (value) => {
+      settled = true;
+      clearTimeout(timer);
+      child.kill();
+      resolve(value);
+    };
+    const doReject = (err) => {
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    };
+
     child.stderr.on('data', (d) => { stderr += d.toString(); });
-    child.on('error', (err) => { clearTimeout(timer); reject(err); });
+    child.on('error', (err) => { doReject(err); });
     child.on('exit', (code) => {
-      if (code !== null && code !== 0) {
-        clearTimeout(timer);
-        reject(new Error(`Server exited with code ${code}. stderr:\n${stderr}`));
-      }
+      if (settled) return;
+      doReject(new Error(`Server exited with code ${code} before answering tools/list. stderr:\n${stderr}`));
     });
 
     child.stdout.on('data', (d) => {
@@ -82,9 +100,7 @@ function listTools(entryPoint) {
         let msg;
         try { msg = JSON.parse(line); } catch { continue; }
         if (msg.id === 2) {
-          clearTimeout(timer);
-          child.kill();
-          resolve(msg.result?.tools ?? []);
+          doResolve(msg.result?.tools ?? []);
         }
       }
     });
@@ -106,7 +122,10 @@ function listTools(entryPoint) {
 export async function verifyBundle(mcpbPath) {
   const workdir = mkdtempSync(join(tmpdir(), 'lw3-mcpb-'));
   try {
-    execFileSync(npx, ['-y', MCPB, 'unpack', mcpbPath, workdir], { stdio: 'pipe' });
+    execFileSync(npx, ['-y', MCPB, 'unpack', quoteArg(mcpbPath), quoteArg(workdir)], {
+      stdio: 'pipe',
+      shell: isWin,
+    });
     const root = findBundleRoot(workdir);
 
     assertRequiredEntries(listFilesRecursive(root));
