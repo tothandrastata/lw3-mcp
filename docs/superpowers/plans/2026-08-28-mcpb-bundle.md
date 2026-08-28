@@ -101,8 +101,10 @@ test('every tool registered in src/index.js is in the manifest', () => {
 In `package.json`, add to `scripts`:
 
 ```json
-"test": "node --test tests/"
+"test": "node --test tests/*.js"
 ```
+
+The directory form `node --test tests/` does not discover the tests on Node 22.20 on this machine; the glob form does. Verified during Task 1.
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
