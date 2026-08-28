@@ -1,5 +1,6 @@
 import mdns from 'multicast-dns';
 import { EventEmitter } from 'events';
+import os from 'node:os';
 
 /**
  * Service types Lightware devices are known to advertise. Both the plain and the
@@ -103,172 +104,141 @@ export class DeviceRegistry {
 }
 
 /**
+ * Every external IPv4 address on this machine.
+ *
+ * multicast-dns receives on all interfaces but transmits on one, chosen by the
+ * OS. On a machine with virtual adapters that choice can land on a Hyper-V
+ * switch, and the query never reaches the LAN. One socket per address removes
+ * the guess.
+ */
+export function externalIPv4Addresses() {
+  const addresses = [];
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries || []) {
+      if (entry.family === 'IPv4' && !entry.internal) addresses.push(entry.address);
+    }
+  }
+  return addresses;
+}
+
+/**
  * Lightware device discovery using mDNS
  * Based on the POC implementation
  */
 export class LightwareDiscovery extends EventEmitter {
-  constructor() {
+  /**
+   * @param {object} [factories] - injectable for tests
+   * @param {(address: string) => object} [factories.createSocket]
+   * @param {() => string[]} [factories.listInterfaces]
+   */
+  constructor(factories = {}) {
     super();
-    this.mdns = null;
-    this.devices = new Map();
-    this.tempDevices = new Map();
-    this.discoveryTimeout = null;
+    this.createSocket = factories.createSocket || ((address) => mdns({ interface: address }));
+    this.listInterfaces = factories.listInterfaces || externalIPv4Addresses;
+    this.sockets = [];
+    this.registry = new DeviceRegistry();
+    this.serviceTypes = new Set(KNOWN_SERVICE_TYPES);
+    this.timers = [];
   }
 
   /**
-   * Start device discovery
-   * @param {number} timeout - Discovery timeout in milliseconds (default: 3000)
-   * @returns {Promise<Array>} Array of discovered devices
+   * One-shot discovery.
+   * @param {number} [timeout] - window in milliseconds
+   * @returns {Promise<Array<{modelName, serialNumber, ipAddress, hostname}>>}
    */
   async discover(timeout = 3000) {
-    return new Promise((resolve, reject) => {
-      // Clear previous data
-      this.devices.clear();
-      this.tempDevices.clear();
+    this.stopDiscovery();
+    this.registry = new DeviceRegistry();
+    this.serviceTypes = new Set(KNOWN_SERVICE_TYPES);
 
-      // Create mDNS instance
-      this.mdns = mdns();
+    const addresses = this.listInterfaces();
+    const candidates = addresses.length > 0 ? addresses : [undefined];
 
-      // Listen for mDNS responses
-      this.mdns.on('response', (response) => {
-        this.handleResponse(response);
-      });
+    for (const address of candidates) {
+      try {
+        const socket = this.createSocket(address);
+        socket.on('response', (response) => this.handleResponse(response, socket));
+        socket.on('error', (error) => console.error('[mDNS Error]', address, error.message));
+        this.sockets.push(socket);
+      } catch (error) {
+        // A disconnected adapter or a permission failure must not fail the scan.
+        console.error('[mDNS] skipping interface', address, error.message);
+      }
+    }
 
-      this.mdns.on('error', (error) => {
-        console.error('[mDNS Error]', error);
-      });
+    if (this.sockets.length === 0) {
+      throw new Error(
+        `Discovery could not open a socket on any network interface (tried: ${addresses.join(', ') || 'none'})`
+      );
+    }
 
-      // Query for Lightware devices
-      this.queryLightwareDevices();
+    // Three rounds inside the window: the PTR -> SRV -> A chase needs more than one shot.
+    this.sendQueries();
+    for (const fraction of [1 / 3, 2 / 3]) {
+      this.timers.push(setTimeout(() => this.sendQueries(), Math.floor(timeout * fraction)));
+    }
 
-      // Set timeout to stop discovery
-      this.discoveryTimeout = setTimeout(() => {
-        this.stopDiscovery();
-        resolve(Array.from(this.devices.values()));
-      }, timeout);
-    });
+    await new Promise((resolve) => this.timers.push(setTimeout(resolve, timeout)));
+
+    const devices = this.registry.list();
+    this.stopDiscovery();
+    return devices;
   }
 
-  /**
-   * Stop device discovery
-   */
   stopDiscovery() {
-    if (this.discoveryTimeout) {
-      clearTimeout(this.discoveryTimeout);
-      this.discoveryTimeout = null;
+    for (const timer of this.timers) clearTimeout(timer);
+    this.timers = [];
+    for (const socket of this.sockets) {
+      try { socket.destroy(); } catch { /* already gone */ }
     }
-
-    if (this.mdns) {
-      this.mdns.destroy();
-      this.mdns = null;
-    }
+    this.sockets = [];
   }
 
-  /**
-   * Query for Lightware devices
-   */
-  queryLightwareDevices() {
-    // Query for common Lightware service types
-    const serviceTypes = [
-      '_lwr3._tcp.local',
-      '_lara-https._tcp.local',
-      '_webldc-http._tcp.local',
-      '_rest-http._tcp.local'
-    ];
-
-    for (const serviceType of serviceTypes) {
-      this.mdns.query({
-        questions: [{ name: serviceType, type: 'PTR' }]
-      });
-    }
-  }
-
-  /**
-   * Handle mDNS response
-   */
-  handleResponse(response) {
-    if (!response.answers) return;
-
-    // Process all answers and additionals to gather device information
-    const allRecords = [...response.answers, ...(response.additionals || [])];
-
-    for (const record of allRecords) {
-      // PTR record contains service instance name
-      if (record.type === 'PTR' && record.data) {
-        const parsed = parseLightwareName(record.data);
-        if (parsed) {
-          const key = `${parsed.product}_${parsed.serial}`;
-          const temp = this.tempDevices.get(key) || {};
-          temp.modelName = parsed.product;
-          temp.serialNumber = parsed.serial;
-          this.tempDevices.set(key, temp);
-        }
-      }
-
-      // SRV record contains hostname and port
-      if (record.type === 'SRV' && record.data) {
-        const hostname = record.data.target;
-        const instanceName = record.name;
-        const parsed = parseLightwareName(instanceName);
-
-        if (parsed) {
-          const key = `${parsed.product}_${parsed.serial}`;
-          const temp = this.tempDevices.get(key) || {};
-          temp.modelName = parsed.product;
-          temp.serialNumber = parsed.serial;
-          temp.hostname = hostname;
-          this.tempDevices.set(key, temp);
-
-          // Query for A record to get IP
-          this.mdns.query([
-            { name: hostname, type: 'A' },
-            { name: hostname, type: 'AAAA' }
-          ]);
-        }
-      }
-
-      // A record contains IPv4 address
-      if (record.type === 'A' && record.data) {
-        const hostname = record.name;
-        const ipAddress = record.data;
-
-        // Try to match this IP to a temp device by hostname
-        for (const [key, temp] of this.tempDevices.entries()) {
-          if (temp.hostname === hostname) {
-            temp.ipAddress = ipAddress;
-            this.tempDevices.set(key, temp);
-
-            // If we have all required info, create the device
-            if (temp.modelName && temp.serialNumber && temp.ipAddress) {
-              this.addDevice({
-                modelName: temp.modelName,
-                serialNumber: temp.serialNumber,
-                ipAddress: temp.ipAddress,
-                hostname: temp.hostname || hostname
-              });
-            }
-          }
-        }
+  /** Ask every socket for the service enumeration and every known service type. */
+  sendQueries() {
+    const names = [SERVICE_ENUMERATION, ...this.serviceTypes];
+    for (const socket of this.sockets) {
+      for (const name of names) {
+        try { socket.query({ questions: [{ name, type: 'PTR' }] }); } catch { /* socket closing */ }
       }
     }
   }
 
   /**
-   * Add a device to the registry
+   * Feed one response into the registry. Records may arrive on any socket and in
+   * any order; the registry joins them at the end.
    */
-  addDevice(device) {
-    const deviceKey = `${device.modelName}_${device.serialNumber}`;
+  handleResponse(response, socket) {
+    const records = [...(response.answers || []), ...(response.additionals || [])];
 
-    if (!this.devices.has(deviceKey)) {
-      this.devices.set(deviceKey, device);
-      this.emit('deviceDiscovered', device);
+    for (const record of records) {
+      if (!record || !record.data) continue;
+
+      if (record.type === 'PTR' && record.name === SERVICE_ENUMERATION) {
+        const type = String(record.data);
+        if (LIGHTWARE_SERVICE.test(type) && !this.serviceTypes.has(type)) {
+          this.serviceTypes.add(type);
+          try { socket.query({ questions: [{ name: type, type: 'PTR' }] }); } catch { /* closing */ }
+        }
+        continue;
+      }
+
+      if (record.type === 'PTR') {
+        this.registry.noteInstance(String(record.data));
+        continue;
+      }
+
+      if (record.type === 'SRV' && record.data.target) {
+        this.registry.noteHostname(String(record.name), record.data.target);
+        try {
+          socket.query({ questions: [{ name: record.data.target, type: 'A' }] });
+        } catch { /* closing */ }
+        continue;
+      }
+
+      if (record.type === 'A') {
+        this.registry.noteAddress(String(record.name), record.data);
+      }
     }
-  }
-
-  /**
-   * Get all discovered devices
-   */
-  getDevices() {
-    return Array.from(this.devices.values());
   }
 }
