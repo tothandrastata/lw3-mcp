@@ -109,6 +109,12 @@ test('a PTR for a service type we did not query is ignored', async () => {
     modelName: 'UCX-4x2-HC30', serialNumber: '00001234',
     ipAddress: null, hostname: null,
   }], 'mDNS is broadcast: an unsolicited _googlecast PTR must not become a phantom device');
+  // This raw registry entry — a PTR with no SRV/A inside the window — carries
+  // neither an address nor a hostname. LightwareDiscovery still reports it (the
+  // class's job is completeness); src/index.js's handleDiscover is what excludes
+  // an entry like this from the "connectable" list it shows to callers (Fix 4).
+  assert.ok(!devices[0].ipAddress && !devices[0].hostname,
+    'this is exactly the unresolved shape handleDiscover now reports separately, not as a found device');
 });
 
 test('a service type learned from the enumeration is still accepted, foreign types still rejected', async () => {
@@ -127,6 +133,37 @@ test('a service type learned from the enumeration is still accepted, foreign typ
     modelName: 'UCX-9000', serialNumber: 'ABCDEF01',
     ipAddress: null, hostname: null,
   }], 'a Lightware-shaped type learned via the enumeration must still be queried and accepted');
+});
+
+test('a PTR whose service-type name differs in case from what was queried is still accepted', async () => {
+  // RFC 6762 §16 requires case-insensitive name comparison. Before Fix 2, the
+  // solicited-record gate compared record.name to this.serviceTypes with no
+  // normalisation, so a responder or mDNS proxy echoing different case than we
+  // queried made the device vanish — a false negative the pre-gate code did not have.
+  const { discovery, sockets } = build(['192.168.2.101']);
+  const p = discovery.discover(150);
+  sockets[0].respond([
+    { type: 'PTR', name: '_LWR3-WSS._TCP.local',
+      data: 'UCX-4x2-HC30 00001234._lwr3-wss._tcp.local' },
+  ]);
+  const devices = await p;
+  assert.deepEqual(devices, [{
+    modelName: 'UCX-4x2-HC30', serialNumber: '00001234',
+    ipAddress: null, hostname: null,
+  }], 'the differently-cased PTR name must still pass the solicited-record gate');
+});
+
+test('a second discover() call while one is running rejects immediately, and the first still resolves', async () => {
+  // Before Fix 3: discover() unconditionally calls stopDiscovery() at the top,
+  // which clears every timer on `this` — including the first call's still-running
+  // resolve timer. Nothing could then settle the first call's promise, so the
+  // second call not rejecting (and instead quietly hijacking the first) was the bug.
+  const { discovery } = build(['192.168.2.101']);
+  const first = discovery.discover(300);
+  await assert.rejects(() => discovery.discover(50), /already in progress/i,
+    'a concurrent call must not silently clear the first call\'s timers out from under it');
+  const devices = await first;
+  assert.deepEqual(devices, [], 'the first call must still resolve normally, not hang forever');
 });
 
 test('every socket is destroyed when the scan ends', async () => {

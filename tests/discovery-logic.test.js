@@ -22,7 +22,8 @@ test('the known list covers both the plain and the secure variants', () => {
 test('the filter keeps Lightware types and drops everything else', () => {
   for (const t of ['_lwr3._tcp.local', '_lwr3-wss._tcp.local', '_lara-https._tcp.local',
                    '_webldc-http._tcp.local', '_webldc-https._tcp.local', '_rest-http._tcp.local',
-                   '_rest-https._tcp.local', '_update-rest-https._tcp.local', '_serial1._tcp.local', '_serial2._tcp.local']) {
+                   '_rest-https._tcp.local', '_update-rest-https._tcp.local', '_serial1._tcp.local', '_serial2._tcp.local',
+                   '_serial10._tcp.local']) {
     assert.ok(LIGHTWARE_SERVICE.test(t), `should keep ${t}`);
   }
   // _lmdmp is a UDP management protocol, not an LW3 endpoint — deliberately excluded.
@@ -119,4 +120,28 @@ test('a device with no A record is still reported, by hostname', () => {
 
 test('an empty registry lists nothing', () => {
   assert.deepEqual(new DeviceRegistry().list(), []);
+});
+
+// RFC 6762 §16 requires case-insensitive name comparison, and nothing stops a
+// responder or an mDNS proxy echoing back different case than was queried.
+
+test('an instance label differing only in case between the PTR data and the SRV name is one device, not two', () => {
+  const r = new DeviceRegistry();
+  r.noteInstance('UCX-4x2-HC30 00001234._lwr3-wss._tcp.local'); // as seen in the PTR
+  r.noteHostname('ucx-4x2-hc30 00001234._lwr3-wss._tcp.local', 'jimmy-hc30.local'); // as seen in the SRV
+  const list = r.list();
+  assert.equal(list.length, 1,
+    'case must not split one device into two incomplete entries; the old code keyed by exact-case label');
+  assert.equal(list[0].hostname, 'jimmy-hc30.local');
+});
+
+test('an A-record name differing in case from the SRV target still resolves the address', () => {
+  const r = new DeviceRegistry();
+  r.noteInstance('UCX-4x2-HC30 00001234._lwr3-wss._tcp.local');
+  r.noteHostname('UCX-4x2-HC30 00001234._lwr3-wss._tcp.local', 'Jimmy-HC30.local');
+  r.noteAddress('JIMMY-hc30.LOCAL', '192.168.2.104'); // A record name, different case than the SRV target
+  const [d] = r.list();
+  assert.equal(d.ipAddress, '192.168.2.104',
+    'case-insensitive address lookup must still join the A record to its device');
+  assert.equal(d.hostname, 'Jimmy-HC30.local', 'the reported hostname keeps its original case');
 });

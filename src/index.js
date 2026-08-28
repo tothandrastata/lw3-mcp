@@ -450,30 +450,46 @@ class LW3MCPServer {
     try {
       const devices = await discovery.discover(timeout);
 
-      if (devices.length === 0) {
+      // An entry with neither ipAddress nor hostname gives `connect` nothing to
+      // dial, so it must not be listed alongside devices that are actually
+      // usable. It's still counted, just separately, so the total stays honest.
+      const connectable = devices.filter((device) => device.ipAddress || device.hostname);
+      const unresolvedCount = devices.length - connectable.length;
+
+      if (connectable.length === 0) {
+        const text =
+          unresolvedCount > 0
+            ? `No connectable Lightware devices found on the network ` +
+              `(${unresolvedCount} device(s) detected but not resolved to an address or hostname within the timeout)`
+            : 'No Lightware devices found on the network';
         return {
           content: [
             {
               type: 'text',
-              text: 'No Lightware devices found on the network',
+              text,
             },
           ],
         };
       }
 
       // Format devices as JSON for easy parsing
-      const devicesJson = devices.map(device => ({
+      const devicesJson = connectable.map(device => ({
         modelName: device.modelName,
         serialNumber: device.serialNumber,
         ipAddress: device.ipAddress,
         hostname: device.hostname
       }));
 
+      let text = `Found ${connectable.length} Lightware device(s):\n\n${JSON.stringify(devicesJson, null, 2)}`;
+      if (unresolvedCount > 0) {
+        text += `\n\n(${unresolvedCount} additional device(s) detected but not resolved to an address or hostname within the timeout; not listed above.)`;
+      }
+
       return {
         content: [
           {
             type: 'text',
-            text: `Found ${devices.length} Lightware device(s):\n\n${JSON.stringify(devicesJson, null, 2)}`,
+            text,
           },
         ],
       };
