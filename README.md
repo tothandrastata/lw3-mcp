@@ -22,7 +22,7 @@ One requirement worth repeating here: **the machine must be on the same network 
 npm install
 npm start          # run the server on stdio
 npm run dev        # same, with --watch
-npm test           # 42 tests, node:test, no test framework needed
+npm test           # 56 tests, node:test, no test framework needed
 npm run bundle     # build the distributable .mcpb
 ```
 
@@ -93,7 +93,7 @@ Register it in `src/index.js` (the `ListToolsRequestSchema` entry, the `switch` 
 
 ## Available tools
 
-Eleven tools. All of them take **separated** `nodepath` and `property`/`method` parameters rather than one combined path string, so a value returned by `GETALL` can be passed straight into `GET` or `CALL`.
+Ten tools. All of them take **separated** `nodepath` and `property`/`method` parameters rather than one combined path string, so a value returned by `GETALL` can be passed straight into `GET` or `CALL`.
 
 ### Discovery and connection
 
@@ -123,8 +123,6 @@ Eleven tools. All of them take **separated** `nodepath` and `property`/`method` 
 - **CALL** — Execute a method
   - `nodepath`, `method` (required), `params` (optional)
   - Sends `CALL /V1/EDID:switchAll(F49)`. Parentheses are always emitted, so a method with no parameters becomes `method()`
-- **OPEN** — Subscribe to a property
-  - `nodepath`, `property` (required)
 - **MAN** — Fetch the device's own documentation for a property or method
   - `nodepath` (required), `item` (required)
   - Note this uses the `.` separator even when `item` is a method name
@@ -143,6 +141,8 @@ Response prefixes:
 
 | Prefix | Meaning |
 |---|---|
+| `{XXXX` | opens the reply block for the command with signature `XXXX` |
+| `}` | closes the current reply block |
 | `pr` | read-only property: `pr /path.Prop=value` |
 | `pw` | read-write property: `pw /path.Prop=value` |
 | `n-` | child node |
@@ -151,12 +151,14 @@ Response prefixes:
 | `pE` / `mE` | property / method error |
 | `er` | general error |
 
+Errors are detected by the `%E<digits>:` marker itself, not by which of these prefixes carries it — `pE`, `mE`, and `-E` (a general command error) all reject the same way.
+
 Two behaviours worth knowing before changing anything:
 
-- **Commands are strictly one at a time.** The protocol layer resolves whichever command is at the head of its queue rather than correlating responses to requests, so concurrent commands would cross-resolve.
-- **`GETALL` is time-boxed, not terminated.** No end-of-response marker is recognised; it collects lines for one second and then parses. Every `GETALL` costs about a second regardless of how fast the device replies.
+- **Every command carries a signature, and replies are correlated by it.** Each command is sent as `XXXX#<command>`, where `XXXX` is a 4-hex-digit signature; the device brackets its reply as `{XXXX` … `}`. A reply is matched to the pending command with that signature rather than to whichever command happens to be waiting, so a late or out-of-order reply can no longer land on the wrong command. A line arriving outside any block is unsolicited — a subscription `CHG` update, a banner — and is emitted as an `unsolicited` event, never treated as a reply. Commands are still sent one at a time in this codebase, but that's now a choice, not a constraint of the correlation itself.
+- **`GETALL` resolves when its block closes, not on a fixed wait.** It uses the same signature/block mechanism as every other command, so it returns as soon as the device sends the closing `}` — measured at 20–25 ms against real hardware, down from the old fixed 1 second. An empty result now means the node genuinely has nothing in it.
 
-Single-line commands time out after 5 seconds. `connect` is bounded too: each transport attempt (TCP, then WSS) times out on its own rather than relying on the OS — see [Connecting: TCP first, WSS fallback](#connecting-tcp-first-wss-fallback).
+Every command times out after 5 seconds if its reply block never closes. `connect` is bounded too: each transport attempt (TCP, then WSS) times out on its own rather than relying on the OS — see [Connecting: TCP first, WSS fallback](#connecting-tcp-first-wss-fallback).
 
 ## Project structure
 
