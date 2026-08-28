@@ -155,11 +155,15 @@ which `connect` accepts.
 
 ### Deduplication
 
-Keyed on the first available of: `serialNumber`, `hostname`, `ipAddress`. The current key,
+Keyed on the **mDNS instance label** — everything before the first dot, e.g.
+`UCX-4x2-HC30 00001234`. That is the identity mDNS itself uses, so one device advertising four
+service types is one entry, and two devices whose names do not parse stay distinct. The current key,
 `modelName_serialNumber`, collapses every unparsed device into a single `undefined_undefined` entry.
 
-Merging is additive: a later packet supplying an A record fills the `ipAddress` of an entry already
-created from a PTR.
+Addresses are held in a separate hostname-to-IP map and joined to instances when the result is
+built, rather than at the moment an A record arrives. This makes record order irrelevant: the
+current code fills in an address only when the A record arrives *after* its SRV, and drops it
+otherwise.
 
 ## Error handling
 
