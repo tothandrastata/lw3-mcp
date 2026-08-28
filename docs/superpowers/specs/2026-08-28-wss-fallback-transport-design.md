@@ -123,10 +123,14 @@ never logged, and never included in an error message.
 Adding `ws` breaks the project's standing no-new-dependencies rule; the rule is being relaxed
 deliberately, because the built-in client cannot do the job.
 
-`ws` is pure JavaScript with no required dependencies, but it declares two **optional** native
-add-ons, `bufferutil` and `utf-8-validate`. If either is compiled into `node_modules`, the bundle
-stops being portable across platforms — the single-artifact-for-every-OS property the packaging
-work rests on.
+`ws` is pure JavaScript. Measured on 2026-08-28: its `dependencies` field is empty, and its two
+native add-ons `bufferutil` and `utf-8-validate` are declared under `peerDependenciesMeta` as
+`optional: true`. A clean `npm install ws` into an empty project added exactly one package and zero
+`.node` binaries.
+
+So the portability risk is small, not zero: an explicit install of either add-on, or a future
+release promoting them out of optional, would compile native code into `node_modules` and cost the
+bundle its single-artifact-for-every-OS property — which the whole packaging approach rests on.
 
 The build must therefore keep proving that property. `scripts/verify-bundle.js` currently checks
 that specific dependencies are present; it will also assert that the unpacked bundle contains **no
@@ -157,7 +161,7 @@ enforces.
 
 | Risk | Mitigation |
 |---|---|
-| `ws` pulls in compiled optional deps and breaks single-artifact portability | The build asserts no `.node` files in the packed bundle and fails if any appear |
+| `ws` pulls in compiled optional deps and breaks single-artifact portability | Low: a clean install adds one pure-JS package and zero `.node` files, measured. The build asserts no `.node` files in the packed bundle regardless, so a future regression fails loudly |
 | Another firmware frames LW3 differently over WebSocket | Verified on one device and one firmware only. The parser handles both one-line and many-lines-per-frame, which covers the plausible variations, but a device that omits newlines entirely would need revisiting |
 | The 3-second timeout is too short on a congested network | The `connect` tool keeps its explicit `port` argument, and a slow device can still be reached directly once diagnosed |
 | A device offers `/lw3` at a different path | Verified on one model. If others differ, the path becomes a parameter |
