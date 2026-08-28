@@ -3,6 +3,8 @@
 Adds eleven tools to Claude Desktop for discovering and controlling Lightware
 devices over LW3.
 
+Prefer step-by-step pictures? See [WALKTHROUGH.md](WALKTHROUGH.md).
+
 ## Requirements
 
 - Claude Desktop, updated to a version with Settings > Extensions
