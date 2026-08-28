@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm install
 npm start                                          # run the server on stdio
 npm run dev                                         # same, with --watch
-npm test                                            # 61 tests, node:test — no framework, no config
+npm test                                            # 85 tests, node:test — no framework, no config
 npm run bundle                                      # build dist/lw3-mcp-<version>.mcpb (scripts/bundle.js)
 npx @modelcontextprotocol/inspector node src/index.js   # interactive tool testing
 ```
@@ -84,7 +84,7 @@ Property lines are split with `/^p[rw] (.+?)\.([^=]+)=(.*)$/` (non-greedy path, 
 
 ### Discovery constraints
 
-`discover` queries PTR for `_lwr3._tcp.local`, `_lara-https._tcp.local`, `_webldc-http._tcp.local`, `_rest-http._tcp.local`, then chases SRV → A. A device is reported **only** when `modelName`, `serialNumber`, and `ipAddress` have all arrived within the timeout (default 3000 ms), and only when the mDNS instance name matches `PRODUCT-NAME SERIAL` (`/^([\w-]+)\s+([A-F0-9]+)$/i`). Devices advertising other name shapes are dropped without warning. Results are keyed `modelName_serialNumber`.
+`discover` opens one mDNS socket per external IPv4 interface, because `multicast-dns` transmits on only one OS-chosen interface and a Hyper-V or VPN adapter can win that choice over the real LAN. Each socket queries the known Lightware service-type list — both plain and `-https`/`-wss` variants, since a device with HTTP disabled advertises only the secure ones — plus whatever Lightware-looking types the network's own `_services._dns-sd._udp.local` enumeration reports (`_lmdmp._udp.local` is deliberately excluded: a UDP management protocol, not LW3). Queries are re-issued three times inside the timeout (default 3000 ms) to cover the PTR → SRV → A chase. Every instance found is reported, keyed by its mDNS instance label: `modelName`/`serialNumber` are `null` when the name doesn't match `PRODUCT SERIAL` (`/^([\w-]+)\s+([A-F0-9]+)$/i`), and `ipAddress` is `null` if no A record arrives in time. Nothing is dropped silently — but a device that never answers within the window still won't appear.
 
 ## Constraints when editing
 

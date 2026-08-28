@@ -22,7 +22,7 @@ One requirement worth repeating here: **the machine must be on the same network 
 npm install
 npm start          # run the server on stdio
 npm run dev        # same, with --watch
-npm test           # 61 tests, node:test, no test framework needed
+npm test           # 85 tests, node:test, no test framework needed
 npm run bundle     # build the distributable .mcpb
 ```
 
@@ -97,9 +97,9 @@ Ten tools. All of them take **separated** `nodepath` and `property`/`method` par
 
 ### Discovery and connection
 
-- **discover** — Find Lightware devices on the local network via mDNS
+- **discover** — Find Lightware devices on the local network via mDNS (see [How discovery works](#how-discovery-works))
   - `timeout` (optional, default 3000 ms)
-  - Returns model name, serial number, IP address, and hostname for each device found
+  - Returns model name, serial number, IP address, and hostname for each device found. `modelName` and `serialNumber` are `null` when the device's mDNS instance name isn't `PRODUCT SERIAL` — the device is still reported, not dropped
 - **connect** — Open the LW3 connection
   - `host` (required): IP address or hostname
   - `port` (optional, default 6107)
@@ -126,6 +126,14 @@ Ten tools. All of them take **separated** `nodepath` and `property`/`method` par
 - **MAN** — Fetch the device's own documentation for a property or method
   - `nodepath` (required), `item` (required)
   - Note this uses the `.` separator even when `item` is a method name
+
+## How discovery works
+
+`discover` opens one mDNS socket per external IPv4 interface on the machine, rather than one shared socket. The `multicast-dns` library receives on every interface but transmits on only one, chosen by the OS — on a machine with a Hyper-V switch or a VPN adapter, that choice can miss the LAN entirely.
+
+Each socket queries a known list of Lightware service types — both the plain and the `-https`/`-wss` variants — plus whatever Lightware-looking types the network's own `_services._dns-sd._udp.local` enumeration reports. The secure variants matter on their own: a device with its HTTP service disabled advertises only those, so querying just the plain names would make it invisible. (`_lmdmp._udp.local` is deliberately left out — a UDP management protocol, not an LW3 endpoint.) Queries are re-issued three times inside the timeout window, because the PTR → SRV → A chase rarely completes in one round.
+
+Every Lightware instance found is reported, deduplicated by its mDNS instance label — nothing is dropped silently. `modelName`/`serialNumber` are `null` when the instance name doesn't parse as `PRODUCT SERIAL`, and `ipAddress` is `null` if no A record arrives before the timeout. As with any mDNS scan, a device that doesn't answer within `timeout` still won't appear in the results.
 
 ## Connecting: TCP first, WSS fallback
 
