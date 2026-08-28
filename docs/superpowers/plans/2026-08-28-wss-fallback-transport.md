@@ -126,6 +126,64 @@ test('emits close after the peer disconnects', async () => {
   await new Promise((resolve) => t.once('close', resolve));
   server.close();
 });
+
+test('close() resolves when called after the peer disconnected', async () => {
+  const server = await listen((sock) => sock.end());
+  try {
+    const { port } = server.address();
+    const t = new TcpTransport('127.0.0.1', port);
+    await t.connect();
+    await new Promise((resolve) => t.once('close', resolve));
+
+    // Race close() against a short timer so a regression hangs the test
+    // instead of hanging the whole suite (and leaving this server's
+    // listening socket open forever).
+    const hang = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('close() hung')), 1000)
+    );
+    await Promise.race([t.close(), hang]);
+  } finally {
+    server.close();
+  }
+});
+
+test('close() resolves when called after a failed connect', async () => {
+  // Bind then immediately close, so the port is almost certainly unused.
+  const server = await listen(() => {});
+  const { port } = server.address();
+  await new Promise((r) => server.close(r));
+
+  const t = new TcpTransport('127.0.0.1', port);
+  await assert.rejects(() => t.connect());
+
+  // Give the socket torn down by the failed connect a moment to actually
+  // finish its own internal 'close' before we call close() ourselves —
+  // otherwise a lucky ordering could mask the bug this guards against.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  const hang = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('close() hung')), 1000)
+  );
+  await Promise.race([t.close(), hang]);
+});
+
+test('close() is safe to call twice in a row', async () => {
+  const server = await listen((sock) => sock.end());
+  try {
+    const { port } = server.address();
+    const t = new TcpTransport('127.0.0.1', port);
+    await t.connect();
+    await new Promise((resolve) => t.once('close', resolve));
+
+    const hang = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('close() hung')), 1000)
+    );
+    await Promise.race([t.close(), hang]);
+    await Promise.race([t.close(), hang]);
+  } finally {
+    server.close();
+  }
+});
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -169,28 +227,53 @@ export class TcpTransport extends EventEmitter {
         if (settled) return;
         settled = true;
         socket.destroy();
+        this.socket = null;
         reject(new Error(`TCP ${this.host}:${this.port} timed out after ${this.timeoutMs}ms`));
       }, this.timeoutMs);
+
+      // Rejects the connect() promise. Only wired up for the duration of the
+      // connect attempt — removed once 'connect' fires so a post-connect
+      // error doesn't run this dead branch on top of the real error handler.
+      const onConnectError = (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        socket.destroy();
+        this.socket = null;
+        reject(new Error(`TCP ${this.host}:${this.port} — ${err.message}`));
+      };
 
       socket.once('connect', () => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        socket.off('error', onConnectError);
         socket.on('data', (d) => this.emit('data', d.toString()));
-        socket.on('close', () => this.emit('close'));
+        socket.on('close', () => {
+          // The socket is dead the moment 'close' fires — drop the
+          // reference so a later close() sees nothing to wait on instead
+          // of attaching a listener to an event that already happened.
+          this.socket = null;
+          this.emit('close');
+        });
         socket.on('error', (err) => this.emit('error', err));
         resolve();
       });
 
-      socket.once('error', (err) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        socket.destroy();
-        reject(new Error(`TCP ${this.host}:${this.port} — ${err.message}`));
-      });
+      socket.once('error', onConnectError);
 
-      socket.connect(this.port, this.host);
+      try {
+        socket.connect(this.port, this.host);
+      } catch (err) {
+        // A synchronous throw (e.g. an invalid port) never reaches the
+        // timeout or the 'error' handler above, so clean up here.
+        clearTimeout(timer);
+        if (!settled) {
+          settled = true;
+          this.socket = null;
+          reject(err);
+        }
+      }
     });
   }
 
@@ -201,12 +284,21 @@ export class TcpTransport extends EventEmitter {
 
   close() {
     return new Promise((resolve) => {
-      if (!this.socket) return resolve();
-      this.socket.once('close', () => {
+      const socket = this.socket;
+      // Nothing to wait on: never connected, already torn down by a failed
+      // connect / peer disconnect, or already destroyed. Waiting for a
+      // 'close' event here would hang forever, since it already fired (or
+      // never will).
+      if (!socket || socket.destroyed) {
+        this.socket = null;
+        resolve();
+        return;
+      }
+      socket.once('close', () => {
         this.socket = null;
         resolve();
       });
-      this.socket.end();
+      socket.end();
     });
   }
 }
@@ -216,7 +308,7 @@ export class TcpTransport extends EventEmitter {
 
 Run: `npm test`
 
-Expected: PASS, 15 tests (10 existing + 5 new), 0 failures, pristine output.
+Expected: PASS, 18 tests (10 existing + 8 new), 0 failures, pristine output.
 
 - [ ] **Step 5: Commit**
 
@@ -424,7 +516,7 @@ export class WssTransport extends EventEmitter {
 
 Run: `npm test`
 
-Expected: PASS, 21 tests, 0 failures.
+Expected: PASS, 24 tests, 0 failures.
 
 - [ ] **Step 6: Commit**
 
@@ -790,7 +882,7 @@ Replace `getConnectionInfo`:
 
 Run: `npm test`
 
-Expected: PASS, 29 tests, 0 failures.
+Expected: PASS, 32 tests, 0 failures.
 
 - [ ] **Step 5: Check nothing still references the old socket field**
 
@@ -859,7 +951,7 @@ Replace `handleConnect` in `src/index.js` with:
 - [ ] **Step 3: Verify the server still starts and lists 11 tools**
 
 Run: `npm test`
-Expected: PASS, 29 tests, 0 failures — the manifest drift tests confirm the tool list is unchanged.
+Expected: PASS, 32 tests, 0 failures — the manifest drift tests confirm the tool list is unchanged.
 
 Run: `node scripts/verify-bundle.js dist/lw3-mcp-1.0.0.mcpb`
 Expected: `OK: bundle unpacks, dependencies present, server lists 11 tools`. This runs the *previously built* bundle, so it is only a sanity check that nothing in the working tree broke the old artifact; Task 5 rebuilds.
@@ -962,7 +1054,7 @@ Then call it inside `verifyBundle`, immediately after the existing `assertRequir
 
 Run: `npm test`
 
-Expected: PASS, 32 tests, 0 failures.
+Expected: PASS, 35 tests, 0 failures.
 
 - [ ] **Step 5: Build and verify the real bundle**
 
@@ -993,6 +1085,6 @@ No automated test can hold a device password, so this last check is manual and i
 
 ## Done when
 
-- `npm test` passes with 32 tests.
+- `npm test` passes with 35 tests.
 - `npm run bundle` exits 0, reporting a path, a size, and `11 tools`.
 - A device answers over `wss` when its TCP port is unreachable.
