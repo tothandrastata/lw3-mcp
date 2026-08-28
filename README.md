@@ -1,158 +1,176 @@
 # LW3 MCP
 
-An MCP (Model Context Protocol) server that provides a gateway to Lightware devices using the LW3 protocol. This server maintains a persistent connection to a Lightware device throughout the MCP session.
+An MCP (Model Context Protocol) server that acts as a gateway to Lightware devices over the LW3 protocol. It discovers devices on the local network and holds one persistent connection for the length of an MCP session.
 
-## Features
+Ships two ways: as an installable bundle for people who just want the tools, and as a normal Node project for people working on it.
 
-- **Persistent Connection**: Maintains a single connection to a Lightware device during the MCP session
-- **LW3 Protocol Support**: Full implementation of the Lightware LW3 protocol
-- **MCP Tools**: Exposes all LW3 commands as MCP tools
+## Install the bundle (most people)
 
-## Available Tools
+The server is packaged as an `.mcpb` [MCP Bundle](#building-the-bundle).
 
-### Connection Management
+**[⬇ Download the latest release](https://github.com/tothandrastata/lw3-mcp/releases/latest/download/lw3-mcp.mcpb)**
 
-- **connect** - Connect to a Lightware device
-  - `host` (required): Device IP address or hostname
-  - `port` (optional): Device port (default: 6107)
+Drag the downloaded file into Claude Desktop's **Settings → Extensions** and you're done — no Node.js, no npm, no editing `claude_desktop_config.json`. Claude Desktop runs the server with its own bundled runtime. Older versions are on the [releases page](https://github.com/tothandrastata/lw3-mcp/releases).
 
-- **disconnect** - Disconnect from the current device
+**[INSTALL.md](INSTALL.md)** is the guide for that audience; it ships next to the `.mcpb` on the file server.
 
-- **status** - Get current connection status
+One requirement worth repeating here: **the machine must be on the same network as the device.** Discovery uses mDNS multicast and connections go to LAN addresses on TCP port 6107. That is also why this cannot be hosted as a remote MCP server — a cloud-hosted instance would sit on the wrong side of your network and find nothing.
 
-### LW3 Protocol Commands
-
-- **GET** - Read a property value
-  - `nodepath` (required): Node path (e.g., "/V1/EDID")
-  - `property` (required): Property name (e.g., "EdidStatus")
-
-- **SET** - Set a property value
-  - `nodepath` (required): Node path (e.g., "/V1/MANAGEMENT/NETWORK")
-  - `property` (required): Property name (e.g., "HostName")
-  - `value` (required): Value to set
-
-- **GETALL** - Get all child nodes, properties and methods of a node
-  - `path` (required): Node path (e.g., "/V1/MANAGEMENT/NETWORK")
-  - Returns structured JSON with three categories:
-    - `properties`: Array of objects with `nodepath`, `property`, `value`, and `writable` fields
-    - `nodes`: Array of sub-path/node strings
-    - `methods`: Array of objects with `nodepath` and `method` fields
-
-- **GETROOT** - Get root structure of the device
-  - No parameters required
-  - Equivalent to `GETALL /V1/*`
-  - Returns the complete device structure with properties, nodes, and methods at the root level
-
-- **CALL** - Execute a method
-  - `nodepath` (required): Node path (e.g., "/V1/EDID")
-  - `method` (required): Method name (e.g., "switchAll" or "applySettings")
-  - `params` (optional): Method parameters (e.g., "F49" will construct "switchAll(F49)")
-  - Response format: `mO <nodepath:method>` for successful execution
-
-- **OPEN** - Open a subscription to a property
-  - `nodepath` (required): Node path (e.g., "/V1/EDID")
-  - `property` (required): Property name (e.g., "EdidStatus")
-
-- **MAN** - Get manual/documentation for a property or method
-  - `nodepath` (required): Node path (e.g., "/V1/MEDIA/VIDEO/O1")
-  - `item` (required): Property or method name (e.g., "Output5VMode")
-  - Returns human-readable syntax and usage description
-
-## Installation
+## Run from source (development)
 
 ```bash
 npm install
+npm start          # run the server on stdio
+npm run dev        # same, with --watch
+npm test           # 10 tests, node:test, no test framework needed
+npm run bundle     # build the distributable .mcpb
 ```
 
-## Usage
-
-### As an MCP Server
-
-Add to your MCP client configuration (e.g., Claude Desktop):
+To point an MCP client at your working tree instead of an installed bundle:
 
 ```json
 {
   "mcpServers": {
     "lightware": {
       "command": "node",
-      "args": ["c:\\Taurus\\mcp-lw3\\src\\index.js"]
+      "args": ["<path-to-repo>/src/index.js"]
     }
   }
 }
 ```
 
-### Example Workflow
+For interactive poking at the tools against a real device:
 
-1. Connect to a device:
-   ```
-   Use the "connect" tool with host "192.168.1.100"
-   ```
+```bash
+npx @modelcontextprotocol/inspector node src/index.js
+```
 
-2. Read a property:
-   ```
-   Use the "GET" tool with property "MEDIA.XP.VIDEO:1.SOURCE"
-   ```
+## Building the bundle
 
-3. Set a property:
-   ```
-   Use the "SET" tool with property "MEDIA.XP.VIDEO:1.SOURCE" and value "2"
-   ```
+```bash
+npm run bundle
+```
 
-4. Get all properties:
-   ```
-   Use the "GETALL" tool
-   ```
+Produces `dist/lw3-mcp-<version>.mcpb`, roughly 2.5 MB, with the version read from `package.json` so the filename cannot drift from the contents. The build runs five steps and refuses to report success unless all of them pass:
 
-5. Disconnect when done:
-   ```
-   Use the "disconnect" tool
-   ```
+1. `npm test` — catches manifest drift before anything is packed
+2. `npm ci --omit=dev` — reinstalls from the lockfile so the build is reproducible
+3. `mcpb validate` — checks `manifest.json` against the real schema
+4. `mcpb pack` — zips the repo plus its dependencies
+5. **Verify** — unpacks the result, confirms the dependencies are inside, and starts the packed server to confirm it answers `tools/list`
 
-## LW3 Protocol
+Step 5 exists because the interesting failures here are silent. A bundle missing `node_modules` installs without complaint and dies on first launch; a stale `manifest.json` version makes Claude Desktop display a version that disagrees with the filename. The verifier reads the *packed* manifest — not your working tree — so it validates the artifact that actually ships.
 
-The LW3 protocol is Lightware's text-based control protocol. This server implements:
+You can re-run that check against any bundle on its own:
 
-- Property reading (GET)
-- Property writing (SET)
-- Bulk property retrieval (GETALL)
-- Method execution (CALL)
-- Property subscriptions (OPEN)
+```bash
+node scripts/verify-bundle.js dist/lw3-mcp-1.0.0.mcpb
+```
 
-### Protocol Details
+### Publishing a release
 
-- **Default Port**: 6107
-- **Message Format**: Line-based text protocol
-- **Response Format**:
-  - Property reads: `pr<property>=<value>`
-  - Errors: `er<error_code>`
+Distribution is GitHub Releases. To cut a new one:
 
-## Project Structure
+1. Bump the version in `package.json` **and** `manifest.json`, then `npm run bundle`
+2. Copy the output to a version-less name as well: `cp dist/lw3-mcp-<version>.mcpb dist/lw3-mcp.mcpb`
+3. Draft a release at [releases/new](https://github.com/tothandrastata/lw3-mcp/releases/new), tag it `v<version>`, and attach both files
+
+Attaching the version-less copy is what keeps this URL working forever:
+
+```
+https://github.com/tothandrastata/lw3-mcp/releases/latest/download/lw3-mcp.mcpb
+```
+
+It is the link in this README and in [INSTALL.md](INSTALL.md), so it must not break. Bundles do not self-update — a new release means people drag in the newer file themselves.
+
+### Changing the version
+
+Bump it in **both** `package.json` and `manifest.json`. `npm test` fails if they disagree, and so does the build's verification step, so this is hard to get wrong quietly.
+
+### Adding a tool
+
+Register it in `src/index.js` (the `ListToolsRequestSchema` entry, the `switch` case, and the handler), then add it to the `tools` array in `manifest.json`. The test suite asserts parity in both directions and will fail until the manifest catches up.
+
+## Available tools
+
+Eleven tools. All of them take **separated** `nodepath` and `property`/`method` parameters rather than one combined path string, so a value returned by `GETALL` can be passed straight into `GET` or `CALL`.
+
+### Discovery and connection
+
+- **discover** — Find Lightware devices on the local network via mDNS
+  - `timeout` (optional, default 3000 ms)
+  - Returns model name, serial number, IP address, and hostname for each device found
+- **connect** — Open the LW3 connection
+  - `host` (required): IP address or hostname
+  - `port` (optional, default 6107)
+- **disconnect** — Close the connection
+- **status** — Report whether a connection is open, and to what
+
+### LW3 commands
+
+- **GET** — Read a property value
+  - `nodepath` (required), e.g. `/V1/EDID`
+  - `property` (required), e.g. `EdidStatus`
+  - Sends `GET /V1/EDID.EdidStatus`
+- **SET** — Write a property value
+  - `nodepath`, `property`, `value` (all required)
+  - Sends `SET /V1/MANAGEMENT/NETWORK.HostName=jimmy-hc40`
+- **GETALL** — List a node's children, properties, and methods
+  - `path` (required), e.g. `/V1/MANAGEMENT/NETWORK`
+  - Returns structured JSON: `properties` (each with `nodepath`, `property`, `value`, `writable`), `nodes`, and `methods` (each with `nodepath`, `method`)
+- **GETROOT** — Device root structure; equivalent to `GETALL /V1/*`
+- **CALL** — Execute a method
+  - `nodepath`, `method` (required), `params` (optional)
+  - Sends `CALL /V1/EDID:switchAll(F49)`. Parentheses are always emitted, so a method with no parameters becomes `method()`
+- **OPEN** — Subscribe to a property
+  - `nodepath`, `property` (required)
+- **MAN** — Fetch the device's own documentation for a property or method
+  - `nodepath` (required), `item` (required)
+  - Note this uses the `.` separator even when `item` is a method name
+
+## LW3 protocol notes
+
+Line-based text protocol over TCP, default port 6107, UTF-8, `\n` terminated.
+
+Response prefixes:
+
+| Prefix | Meaning |
+|---|---|
+| `pr` | read-only property: `pr /path.Prop=value` |
+| `pw` | read-write property: `pw /path.Prop=value` |
+| `n-` | child node |
+| `m-` | method |
+| `mO` | method executed successfully |
+| `pE` / `mE` | property / method error |
+| `er` | general error |
+
+Two behaviours worth knowing before changing anything:
+
+- **Commands are strictly one at a time.** The protocol layer resolves whichever command is at the head of its queue rather than correlating responses to requests, so concurrent commands would cross-resolve.
+- **`GETALL` is time-boxed, not terminated.** No end-of-response marker is recognised; it collects lines for one second and then parses. Every `GETALL` costs about a second regardless of how fast the device replies.
+
+Single-line commands time out after 5 seconds. `connect` itself has no timeout of its own, so a silently dropped connection relies on the OS.
+
+## Project structure
 
 ```
 lw3-mcp/
 ├── src/
-│   ├── index.js           # MCP server implementation
-│   └── lw3-protocol.js    # LW3 protocol handler
-├── package.json
-├── README.md
-└── CLAUDE.md
+│   ├── index.js                 # MCP server: tool registration and handlers
+│   ├── lw3-protocol.js          # TCP socket, framing, command queue
+│   └── lightware-discovery.js   # mDNS device discovery
+├── scripts/
+│   ├── bundle.js                # npm run bundle
+│   └── verify-bundle.js         # unpack-and-run verification
+├── tests/                       # node:test suites
+├── assets/                      # bundle icon (svg source + 512px png)
+├── manifest.json                # what Claude Desktop reads to launch the server
+├── .mcpbignore                  # what stays out of the bundle
+├── INSTALL.md                   # end-user install guide, ships with the .mcpb
+└── CLAUDE.md                    # architecture notes for AI coding agents
 ```
 
-## Development
-
-Run in development mode with auto-reload:
-
-```bash
-npm run dev
-```
-
-## Error Handling
-
-The server includes comprehensive error handling:
-- Connection errors are reported clearly
-- Command timeouts (5 seconds)
-- Validates connection state before executing commands
-- Graceful cleanup on shutdown
+Design and implementation notes for the packaging work live in `docs/superpowers/`.
 
 ## License
 

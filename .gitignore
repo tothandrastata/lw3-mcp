@@ -3,3 +3,9 @@ node_modules/
 .DS_Store
 .env
 dist/
+
+# Markdown preview exports (VS Code). WALKTHROUGH.pdf is a deliberate
+# deliverable and is tracked; the 34 MB HTML export is not.
+/*.html
+/*.pdf
+!/WALKTHROUGH.pdf
