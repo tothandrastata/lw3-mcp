@@ -42,6 +42,10 @@ convenience, not a prerequisite.
 **"Not connected to a device".** Ask Claude to connect first. The connection does
 not survive a Claude Desktop restart.
 
+**Connection hangs without error.** Traffic to port 6107 is being silently dropped,
+usually by a full-tunnel VPN or firewall. Disconnect from the VPN, verify you're on
+the same subnet as the device, and check the address from discovery in case it's wrong.
+
 **Commands time out.** The device is reachable but not answering on port 6107.
 Confirm LW3 is enabled on the device.
 
