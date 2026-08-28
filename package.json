@@ -23,6 +23,7 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
-    "multicast-dns": "^7.2.5"
+    "multicast-dns": "^7.2.5",
+    "ws": "^8.21.3"
   }
 }
