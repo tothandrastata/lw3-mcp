@@ -18,8 +18,11 @@ Prefer step-by-step pictures? See [WALKTHROUGH.md](WALKTHROUGH.md).
 
 1. Download the bundle:
    **https://github.com/tothandrastata/lw3-mcp/releases/latest/download/lw3-mcp.mcpb**
-2. Open Claude Desktop and go to **Settings > Extensions**.
-3. Drag the downloaded `lw3-mcp.mcpb` onto that window.
+2. Open Claude Desktop → **Settings** → **Extensions**, under the
+   **Desktop app** heading in the left sidebar.
+3. Drag the downloaded `lw3-mcp.mcpb` onto the line reading
+   **"Drag .MCPB or .DXT files here to install"**. If the drop does not
+   register, use **Advanced settings** just above it to install from a file.
 4. Confirm the install prompt.
 
 That link always serves the newest release. To pin a specific version instead,

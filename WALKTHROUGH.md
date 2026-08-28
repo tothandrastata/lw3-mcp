@@ -3,10 +3,17 @@
 <style>
 /* Print / HTML-export only. GitHub strips <style>, so this is a no-op there. */
 .page-break { break-after: page; page-break-after: always; }
+
+/* Screenshot size. Raise or lower the one number below to taste.
+   max-width only, deliberately: adding width:100% would upscale the
+   narrow captures (01-gear is 420px wide) and make them blurry. */
+img { max-width: 860px; height: auto; display: block; }
+
 @media print {
   h2 { break-after: avoid; page-break-after: avoid; }
   img, blockquote { break-inside: avoid; page-break-inside: avoid; }
   a { color: inherit; text-decoration: underline; }
+  img { max-width: 15cm; }
 }
 </style>
 
@@ -27,8 +34,6 @@ broadcast to the wrong place.
 
 ---
 
-<div class="page-break"></div>
-
 ## Step 1 — Download the file
 
 Click here:
@@ -48,23 +53,30 @@ Your browser saves `lw3-mcp.mcpb` to your Downloads folder.
 
 Open Claude Desktop. Click the **gear icon** to open Settings.
 
-In the Settings window, choose **Extensions** from the list on the left.
+<img src="assets/screenshots/01-gear.png" alt="Claude Desktop with the Settings gear circled" width="300">
+<div class="page-break"></div>
 
-![Claude Desktop with the Settings gear circled](assets/screenshots/02-settings.png)
+In the list on the left, scroll past the first group to the **Desktop app**
+heading and click **Extensions** underneath it.
 
+<img src="assets/screenshots/02-settings.png" alt="Extensions" width="760">
 
 <div class="page-break"></div>
 
 ## Step 3 — Drag the file in
 
-Open your Downloads folder next to the Claude Desktop window. Drag
-`lw3-mcp.mcpb` out of Downloads and drop it onto the Extensions page.
+The Extensions page has a line near the middle reading
+**"Drag .MCPB or .DXT files here to install"**. That is the target.
 
-![Dragging the file from Explorer onto the Extensions pane](assets/screenshots/04-drag.png)
+Open your Downloads folder next to the Claude Desktop window, then drag
+`lw3-mcp.mcpb` out of Downloads and drop it on that line.
 
-> **If nothing happens when you drop it**, look on the Extensions page for a
-> button that installs an extension from a file, and use that to pick
-> `lw3-mcp.mcpb` from your Downloads folder instead.
+<img src="assets/screenshots/04-drag.png" alt="Dragging the file from Explorer onto the Extensions pane" width="860">
+
+> **If nothing happens when you drop it**, click **Advanced settings** —
+> the button just above that line — and look there for the option to install
+> an extension from a file, then pick `lw3-mcp.mcpb` from your Downloads
+> folder instead.
 
 ---
 
@@ -74,9 +86,7 @@ Open your Downloads folder next to the Claude Desktop window. Drag
 
 You can avoid allowance of each tool (GET / SET / CALL / ...) separately by allowing all:
 
-![Allow all tools of the extension](assets/screenshots/05-confirm.png)
-
----
+<img src="assets/screenshots/05-confirm.png" alt="Allow all tools of the extension" width="420">
 
 <div class="page-break"></div>
 
@@ -89,15 +99,13 @@ Start a new chat and type:
 Claude replies with the devices it found — model name, serial number, and IP
 address for each one.
 
-![A chat showing the discover result with a device listed](assets/screenshots/07-first-use.png)
+<img src="assets/screenshots/07-first-use.png" alt="A chat showing the discover result with a device listed" width="700">
 
 Then connect to one and ask for whatever you need:
 
 
-![A chat showing the video input status if the discovered device](assets/screenshots/08-videostatus.png)
+<img src="assets/screenshots/08-videostatus.png" alt="A chat showing the video input status if the discovered device" width="700">
 
-
----
 
 <div class="page-break"></div>
 
