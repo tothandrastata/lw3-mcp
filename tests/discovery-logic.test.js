@@ -20,13 +20,15 @@ test('the known list covers both the plain and the secure variants', () => {
 });
 
 test('the filter keeps Lightware types and drops everything else', () => {
-  for (const t of ['_lwr3-wss._tcp.local', '_webldc-https._tcp.local', '_rest-https._tcp.local',
-                   '_update-rest-https._tcp.local', '_serial1._tcp.local', '_serial2._tcp.local']) {
+  for (const t of ['_lwr3._tcp.local', '_lwr3-wss._tcp.local', '_lara-https._tcp.local',
+                   '_webldc-http._tcp.local', '_webldc-https._tcp.local', '_rest-http._tcp.local',
+                   '_rest-https._tcp.local', '_update-rest-https._tcp.local', '_serial1._tcp.local', '_serial2._tcp.local']) {
     assert.ok(LIGHTWARE_SERVICE.test(t), `should keep ${t}`);
   }
   // _lmdmp is a UDP management protocol, not an LW3 endpoint — deliberately excluded.
+  // _restaurant and _larafoo are false positives: they begin with Lightware words but lack the - or . boundary.
   for (const t of ['_lmdmp._udp.local', '_googlecast._tcp.local', '_home-assistant._tcp.local',
-                   '_ASUSTOR_NVR._tcp.local', '_http._tcp.local']) {
+                   '_ASUSTOR_NVR._tcp.local', '_http._tcp.local', '_restaurant._tcp.local', '_larafoo._tcp.local']) {
     assert.ok(!LIGHTWARE_SERVICE.test(t), `should drop ${t}`);
   }
 });

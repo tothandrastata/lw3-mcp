@@ -17,8 +17,13 @@ export const KNOWN_SERVICE_TYPES = [
   '_update-rest-https._tcp.local',
 ];
 
-/** The meta-query returns every service type on the network; keep the Lightware ones. */
-export const LIGHTWARE_SERVICE = /^_(lwr3|lara|webldc|rest|update-rest|serial\d)/;
+/**
+ * The meta-query returns every service type on the network; keep the Lightware ones.
+ * Requires the matched prefix to be followed by - or . to avoid false positives:
+ * e.g., _restaurant._tcp.local (begins with "rest") or _larafoo._tcp.local (begins with "lara")
+ * must be rejected, while _rest-http._tcp.local and _lara-https._tcp.local are kept.
+ */
+export const LIGHTWARE_SERVICE = /^_(lwr3|lara|webldc|rest|update-rest|serial\d)(-|\.)/;
 
 /** The standard DNS-SD query that enumerates a network's service types. */
 export const SERVICE_ENUMERATION = '_services._dns-sd._udp.local';
