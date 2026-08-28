@@ -17,12 +17,6 @@ img { max-width: 860px; height: auto; display: block; }
 }
 </style>
 
-For anyone who would rather see it than read it. Takes about two minutes.
-
-If you are comfortable with software installs, [INSTALL.md](INSTALL.md) says the
-same thing in a quarter of the space.
-
----
 
 ## Before you start
 
@@ -46,7 +40,6 @@ Your browser saves `lw3-mcp.mcpb` to your Downloads folder.
 > unfamiliar file type, not a dangerous one. Choose *Keep* or *Download anyway*.
 
 ---
-
 <div class="page-break"></div>
 
 ## Step 2 — Open Claude Desktop's settings
@@ -54,12 +47,13 @@ Your browser saves `lw3-mcp.mcpb` to your Downloads folder.
 Open Claude Desktop. Click the **gear icon** to open Settings.
 
 <img src="assets/screenshots/01-gear.png" alt="Claude Desktop with the Settings gear circled" width="300">
-<div class="page-break"></div>
+
+
 
 In the list on the left, scroll past the first group to the **Desktop app**
 heading and click **Extensions** underneath it.
 
-<img src="assets/screenshots/02-settings.png" alt="Extensions" width="760">
+<img src="assets/screenshots/02-settings.png" alt="Extensions" width="460">
 
 <div class="page-break"></div>
 
@@ -71,22 +65,19 @@ The Extensions page has a line near the middle reading
 Open your Downloads folder next to the Claude Desktop window, then drag
 `lw3-mcp.mcpb` out of Downloads and drop it on that line.
 
-<img src="assets/screenshots/04-drag.png" alt="Dragging the file from Explorer onto the Extensions pane" width="860">
+<img src="assets/screenshots/04-drag.png" alt="Dragging the file from Explorer onto the Extensions pane" width="560">
 
 > **If nothing happens when you drop it**, click **Advanced settings** —
 > the button just above that line — and look there for the option to install
 > an extension from a file, then pick `lw3-mcp.mcpb` from your Downloads
 > folder instead.
 
----
-
-<div class="page-break"></div>
 
 ## Step 4 — Configure permissions
 
 You can avoid allowance of each tool (GET / SET / CALL / ...) separately by allowing all:
 
-<img src="assets/screenshots/05-confirm.png" alt="Allow all tools of the extension" width="420">
+<img src="assets/screenshots/05-confirm.png" alt="Allow all tools of the extension" width="220">
 
 <div class="page-break"></div>
 
@@ -106,6 +97,10 @@ Then connect to one and ask for whatever you need:
 
 <img src="assets/screenshots/08-videostatus.png" alt="A chat showing the video input status if the discovered device" width="700">
 
+> **If Claude asks for a password**, that is expected — some devices only
+> accept a secure connection that needs the device's **admin** password (the
+> same one you'd use to log in to the device's own web page). It goes straight
+> to the device; this extension does not store it or show it back to you.
 
 <div class="page-break"></div>
 
@@ -119,9 +114,10 @@ address.
 **"Not connected to a device".** Ask Claude to connect first. The connection
 closes when you quit Claude Desktop, so you reconnect each time you restart it.
 
-**It seems stuck when connecting.** The address is probably wrong, or a firewall
-is blocking it. Double-check the IP address and that you are on the office
-network.
+**It seems stuck when connecting.** The extension tries a couple of ways to
+reach the device automatically, so this is rarer than it used to be, but it
+can still happen if the address is wrong or a firewall blocks both. Double-check
+the IP address and that you are on the office network.
 
 **Anything else** — send a screenshot to Andras Toth.
 

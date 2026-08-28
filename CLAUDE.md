@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**lw3-mcp** is an MCP server that acts as a gateway to Lightware AV devices over the LW3 protocol (line-based TCP text protocol, default port 6107). One MCP session holds one persistent device connection.
+**lw3-mcp** is an MCP server that acts as a gateway to Lightware AV devices over the LW3 protocol (line-based text protocol, default port 6107). One MCP session holds one persistent device connection. `connect` tries a raw TCP socket first and, if that fails, falls back to a secure WebSocket at `wss://<host>/lw3` — the same endpoint the device's own web UI uses. Some devices require the `admin` password over that path; `connect` takes it as an optional `password` argument.
 
 ## Commands
 
@@ -12,20 +12,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm install
 npm start                                          # run the server on stdio
 npm run dev                                         # same, with --watch
+npm test                                            # 42 tests, node:test — no framework, no config
+npm run bundle                                      # build dist/lw3-mcp-<version>.mcpb (scripts/bundle.js)
 npx @modelcontextprotocol/inspector node src/index.js   # interactive tool testing
 ```
 
-There is no test framework, linter, or build step, and no smoke-test script since `test-connection.js` was removed in `452e975`. The MCP Inspector is the practical way to exercise tools against a real device.
+There is no linter. `npm test` runs `tests/*.js` with `node:test`; `npm run bundle` runs the test suite as its first step, so a broken test blocks the build. The MCP Inspector is still the practical way to exercise tools against a real device.
 
 `cursor_config.json` is a sample MCP client registration pointing at `C:\Taurus\lw3-mcp\src\index.js`.
 
 ## Architecture
 
-Three files, three layers, no framework in between:
-
 - [src/index.js](src/index.js) — `LW3MCPServer`. Registers 11 MCP tools, owns the single `LW3Protocol` instance for the process lifetime, and **builds the LW3 path strings**. The protocol layer never assembles paths.
-- [src/lw3-protocol.js](src/lw3-protocol.js) — `LW3Protocol extends EventEmitter`. TCP socket, line buffering, command queue, GETALL response parsing.
+- [src/lw3-protocol.js](src/lw3-protocol.js) — `LW3Protocol extends EventEmitter`. Owns no socket itself: line buffering, command queue, GETALL response parsing, and the TCP→WSS fallback in `connect()`. Transport construction is injected via `createTcp`/`createWss` factories passed to the constructor, so tests substitute fakes instead of opening real sockets (see `tests/fallback.test.js`).
+- [src/transports/tcp.js](src/transports/tcp.js) — `TcpTransport extends EventEmitter`. Raw TCP socket, port 6107 by default. `connect()` is bounded by `CONNECT_TIMEOUT_MS` (3s) so a silently dropped connection fails fast instead of waiting on the OS. Emits `data` (strings), `close`, `error`.
+- [src/transports/wss.js](src/transports/wss.js) — `WssTransport extends EventEmitter`. Secure WebSocket to `wss://<host>/lw3`; `rejectUnauthorized: false` because devices self-sign. `connect()` uses the same `CONNECT_TIMEOUT_MS` as a `handshakeTimeout`. Sends HTTP Basic auth as the `admin` user when a password is supplied; a 401 response throws `AuthRequiredError` (distinguishing "no password yet" from "password rejected") so `index.js` can ask the user for it instead of reporting a generic failure. Same `data`/`close`/`error` event shape as `TcpTransport`, so `LW3Protocol` treats both uniformly.
 - [src/lightware-discovery.js](src/lightware-discovery.js) — `LightwareDiscovery extends EventEmitter`. mDNS sweep, independent of the connection; a fresh instance is created and destroyed per `discover` call.
+
+### Transport fallback (`LW3Protocol.connect`)
+
+`connect(host, port, { password })` tries `TcpTransport` first. If it fails, it tries `WssTransport` with `password` (which may be `undefined`). If WSS also fails with an `AuthRequiredError`, that error is rethrown as-is — it is directly actionable ("ask the user for the password") and burying it in a combined message would hide that. Any other double failure raises one error naming both underlying failures. `getConnectionInfo()` reports which transport actually connected as `transport: 'tcp' | 'wss'`; both the `connect` and `status` tool responses surface it.
 
 ### Path construction lives in index.js
 

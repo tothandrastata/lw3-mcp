@@ -9,9 +9,13 @@ Prefer step-by-step pictures? See [WALKTHROUGH.md](WALKTHROUGH.md).
 
 - Claude Desktop, updated to a version with Settings > Extensions
 - **Your computer must be on the same network as the device.** The gateway sends
-  mDNS multicast to find devices and connects to them on TCP port 6107. A VPN
-  that routes all traffic, or a guest network that blocks multicast, will make
-  discovery return nothing.
+  mDNS multicast to find devices and connects to them on TCP port 6107, falling
+  back to a secure connection if that port is blocked. A VPN that routes all
+  traffic, or a guest network that blocks multicast, will make discovery return
+  nothing.
+- **Some devices ask for a password.** If the device requires it, Claude will
+  ask you for its **admin** password before it can connect. This is normal —
+  see [If Claude asks for a device password](#if-claude-asks-for-a-device-password) below.
 - No Node.js or npm needed. Claude Desktop runs the server with its own runtime.
 
 ## Install
@@ -54,12 +58,32 @@ convenience, not a prerequisite.
 **"Not connected to a device".** Ask Claude to connect first. The connection does
 not survive a Claude Desktop restart.
 
-**Connection hangs without error.** Traffic to port 6107 is being silently dropped,
-usually by a full-tunnel VPN or firewall. Disconnect from the VPN, verify you're on
-the same subnet as the device, and check the address from discovery in case it's wrong.
+**Connection hangs without error.** The gateway tries port 6107 first and falls
+back to a secure connection automatically, so a single blocked port should no
+longer cause a hang — but both paths can still fail together, usually because of
+a full-tunnel VPN or firewall. Disconnect from the VPN, verify you're on the
+same subnet as the device, and check the address from discovery in case it's
+wrong.
 
-**Commands time out.** The device is reachable but not answering on port 6107.
-Confirm LW3 is enabled on the device.
+**Commands time out.** The device is reachable but not answering. Confirm LW3
+is enabled on the device.
+
+**Claude asks for a password.** Some devices only accept the secure fallback
+connection with a password. See below.
+
+## If Claude asks for a device password
+
+If the connection can't be made the normal way, this extension automatically
+tries a more secure connection instead — the same one the device's own web
+page uses. Some devices require a password for that, and Claude will ask you
+for it by name: the device's **admin** password (the same one you'd use to log
+in to the device's web page).
+
+**This is expected behavior, not a sign of a problem.** The password goes
+straight to the device you asked Claude to connect to; this extension does
+not send it anywhere else, store it, or show it back to you in any message.
+If you don't know the device's admin password, ask whoever manages your
+Lightware equipment.
 
 ## Updating
 

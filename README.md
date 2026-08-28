@@ -14,7 +14,7 @@ Drag the downloaded file into Claude Desktop's **Settings → Extensions** and y
 
 **[INSTALL.md](INSTALL.md)** is the guide for that audience; it ships next to the `.mcpb` on the file server.
 
-One requirement worth repeating here: **the machine must be on the same network as the device.** Discovery uses mDNS multicast and connections go to LAN addresses on TCP port 6107. That is also why this cannot be hosted as a remote MCP server — a cloud-hosted instance would sit on the wrong side of your network and find nothing.
+One requirement worth repeating here: **the machine must be on the same network as the device.** Discovery uses mDNS multicast, and connections go to LAN addresses — TCP port 6107 first, falling back to a secure WebSocket if that's blocked (see [Connecting: TCP first, WSS fallback](#connecting-tcp-first-wss-fallback)). That is also why this cannot be hosted as a remote MCP server — a cloud-hosted instance would sit on the wrong side of your network and find nothing.
 
 ## Run from source (development)
 
@@ -22,7 +22,7 @@ One requirement worth repeating here: **the machine must be on the same network 
 npm install
 npm start          # run the server on stdio
 npm run dev        # same, with --watch
-npm test           # 10 tests, node:test, no test framework needed
+npm test           # 42 tests, node:test, no test framework needed
 npm run bundle     # build the distributable .mcpb
 ```
 
@@ -103,6 +103,7 @@ Eleven tools. All of them take **separated** `nodepath` and `property`/`method` 
 - **connect** — Open the LW3 connection
   - `host` (required): IP address or hostname
   - `port` (optional, default 6107)
+  - `password` (optional): the device's `admin` password. Only needed if the device requires authentication over the WSS fallback — `connect` says so when it does, and it's safe to omit otherwise
 - **disconnect** — Close the connection
 - **status** — Report whether a connection is open, and to what
 
@@ -128,9 +129,15 @@ Eleven tools. All of them take **separated** `nodepath` and `property`/`method` 
   - `nodepath` (required), `item` (required)
   - Note this uses the `.` separator even when `item` is a method name
 
+## Connecting: TCP first, WSS fallback
+
+`connect` tries a raw TCP socket on port 6107 first — the device's native transport, bounded to 3 seconds so a silently dropped connection (VPN, firewall) fails fast instead of waiting on the OS. If that fails, it falls back to a secure WebSocket at `wss://<host>/lw3`, the same endpoint the device's own web UI uses, with the same bounded handshake. The device's certificate is self-signed, so the fallback does not verify it — the connection is encrypted but the device's identity is not.
+
+Some devices require authentication over the WSS path. When one does, `connect` fails with a message asking for the device's `admin` password; pass it as the optional `password` argument and call `connect` again. `status` reports which transport is actually in use (`tcp` or `wss`), so you can tell which path a session ended up on.
+
 ## LW3 protocol notes
 
-Line-based text protocol over TCP, default port 6107, UTF-8, `\n` terminated.
+Line-based text protocol, UTF-8, `\n` terminated — over a raw TCP socket (port 6107) or, when that's unavailable, the secure WebSocket fallback described above. Both transports feed the same line-based parser.
 
 Response prefixes:
 
@@ -149,7 +156,7 @@ Two behaviours worth knowing before changing anything:
 - **Commands are strictly one at a time.** The protocol layer resolves whichever command is at the head of its queue rather than correlating responses to requests, so concurrent commands would cross-resolve.
 - **`GETALL` is time-boxed, not terminated.** No end-of-response marker is recognised; it collects lines for one second and then parses. Every `GETALL` costs about a second regardless of how fast the device replies.
 
-Single-line commands time out after 5 seconds. `connect` itself has no timeout of its own, so a silently dropped connection relies on the OS.
+Single-line commands time out after 5 seconds. `connect` is bounded too: each transport attempt (TCP, then WSS) times out on its own rather than relying on the OS — see [Connecting: TCP first, WSS fallback](#connecting-tcp-first-wss-fallback).
 
 ## Project structure
 
@@ -157,7 +164,10 @@ Single-line commands time out after 5 seconds. `connect` itself has no timeout o
 lw3-mcp/
 ├── src/
 │   ├── index.js                 # MCP server: tool registration and handlers
-│   ├── lw3-protocol.js          # TCP socket, framing, command queue
+│   ├── lw3-protocol.js          # framing, command queue, TCP->WSS fallback
+│   ├── transports/
+│   │   ├── tcp.js               # raw TCP socket, port 6107
+│   │   └── wss.js               # secure WebSocket fallback, wss://<host>/lw3
 │   └── lightware-discovery.js   # mDNS device discovery
 ├── scripts/
 │   ├── bundle.js                # npm run bundle
