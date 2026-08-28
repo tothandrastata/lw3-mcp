@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "lw3-mcp": {
+      "command": "node",
+      "env": {
+        "PATH": "C:\\Windows\\System32;C:\\Windows;C:\\Program Files\\nodejs",
+        "NODE_ENV": "production"
+      },
+      "args": [
+        "C:\\Taurus\\lw3-mcp\\src\\index.js"
+      ],
+      "cwd": "C:\\Taurus\\lw3-mcp"
+    }
+  }
+}

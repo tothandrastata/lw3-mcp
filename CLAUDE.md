@@ -4,298 +4,87 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**LW3 MCP** is an MCP (Model Context Protocol) server that provides a gateway to Lightware devices using the LW3 protocol. It maintains a persistent connection to a Lightware device throughout the MCP session.
+**lw3-mcp** is an MCP server that acts as a gateway to Lightware AV devices over the LW3 protocol (line-based TCP text protocol, default port 6107). One MCP session holds one persistent device connection.
+
+## Commands
+
+```bash
+npm install
+npm start                                          # run the server on stdio
+npm run dev                                         # same, with --watch
+npx @modelcontextprotocol/inspector node src/index.js   # interactive tool testing
+node test-connection.js                             # direct protocol smoke test (needs a real device)
+```
+
+There is no test framework, linter, or build step. `test-connection.js` is a hand-run script against a hardcoded host (`jimmy-hc40.local`) and is **stale**: it treats the `getAll()` result as an array, but `getAll()` now returns `{properties, nodes, methods}`. Fix or ignore that section when using it.
+
+`cursor_config.json` (untracked) is a sample MCP client registration pointing at `C:\Taurus\lw3-mcp\src\index.js`.
 
 ## Architecture
 
-### Key Components
+Three files, three layers, no framework in between:
 
-- **[src/index.js](src/index.js)**: Main MCP server implementation
-  - Handles MCP tool registration and requests
-  - Manages the persistent LW3 connection
-  - Implements 11 MCP tools with separated nodepath/property parameters
+- [src/index.js](src/index.js) — `LW3MCPServer`. Registers 11 MCP tools, owns the single `LW3Protocol` instance for the process lifetime, and **builds the LW3 path strings**. The protocol layer never assembles paths.
+- [src/lw3-protocol.js](src/lw3-protocol.js) — `LW3Protocol extends EventEmitter`. TCP socket, line buffering, command queue, GETALL response parsing.
+- [src/lightware-discovery.js](src/lightware-discovery.js) — `LightwareDiscovery extends EventEmitter`. mDNS sweep, independent of the connection; a fresh instance is created and destroyed per `discover` call.
 
-- **[src/lw3-protocol.js](src/lw3-protocol.js)**: LW3 protocol handler
-  - Manages TCP socket connection to Lightware devices (default port 6107)
-  - Implements LW3 command/response protocol
-  - Handles line-based message parsing
-  - Manages command queue with timeouts
-  - Parses and structures GETALL responses
+### Path construction lives in index.js
 
-- **[src/lightware-discovery.js](src/lightware-discovery.js)**: mDNS device discovery
-  - Discovers Lightware devices on the local network using multicast DNS
-  - Queries for common Lightware service types (_lwr3, _lara-https, _webldc-http, _rest-http)
-  - Extracts device information (model name, serial number, IP address, hostname)
-  - Based on POC implementation from lara-builder/ai-agent-app/poc/mdns-discovery
+The tools take **separated** `nodepath` + `property`/`method`/`item` parameters and join them in the handlers. Anything changing separator or call syntax is edited in `index.js`, not the protocol layer:
 
-### Design Patterns
+| Handler | Builds | Note |
+|---|---|---|
+| `handleGet`/`handleSet`/`handleOpen` | `nodepath.property` | dot separator |
+| `handleCall` | `nodepath:method(params)` | **always emits parentheses** — `method()` when `params` is omitted (commit `21b6d4e`) |
+| `handleMan` | `nodepath.item` | dot even when `item` is a method name |
+| `getRoot()` | `GETALL /V1/*` | the only path built in the protocol layer |
 
-- **Persistent Connection**: Single TCP connection per MCP session, maintained in the LW3Protocol instance
-- **Event-Driven**: Uses EventEmitter for connection lifecycle events
-- **Promise-Based**: All async operations return promises for clean error handling
-- **Command Queue**: Maps pending commands to handle async responses
-- **Separated Parameters**: All tools use separate `nodepath` and `property/method` parameters for clarity
+`LW3Protocol.call(method, params = [])` accepts a params array it joins with spaces, but `index.js` always passes `[]` because params are already baked into the path string. That second argument is effectively dead.
 
-## Available MCP Tools
+### The command queue only supports one in-flight command
 
-### Device Discovery
+This is the most important invariant. `processResponse()` resolves **the first entry in `pendingCommands`**, not the command that actually produced the line — responses are never correlated with requests:
 
-1. **discover** - Discover Lightware devices on the local network
-   - Parameters: `timeout` (optional, default: 3000ms)
-   - Returns: JSON array of discovered devices with modelName, serialNumber, ipAddress, hostname
-   - Uses mDNS to find devices advertising Lightware service types
-
-### Connection Management
-
-2. **connect** - Establish connection to a Lightware device
-   - Parameters: `host` (required), `port` (optional, default: 6107)
-
-3. **disconnect** - Close connection to the device
-   - Parameters: none
-
-4. **status** - Get current connection status
-   - Parameters: none
-   - Returns: connection info (host, port, connected status)
-
-### LW3 Protocol Commands
-
-All commands use **separated parameters** for better usability:
-
-5. **GET** - Read a property value
-   - Parameters:
-     - `nodepath` (required): e.g., `/V1/EDID`
-     - `property` (required): e.g., `EdidStatus`
-   - Constructs: `GET /V1/EDID.EdidStatus`
-
-6. **SET** - Set a property value
-   - Parameters:
-     - `nodepath` (required): e.g., `/V1/MANAGEMENT/NETWORK`
-     - `property` (required): e.g., `HostName`
-     - `value` (required): e.g., `jimmy-hc40`
-   - Constructs: `SET /V1/MANAGEMENT/NETWORK.HostName=jimmy-hc40`
-
-7. **GETALL** - Get all child nodes, properties, and methods of a node
-   - Parameters:
-     - `path` (required): node path, e.g., `/V1/MANAGEMENT/NETWORK`
-   - Returns: Structured JSON with separated nodepath/property fields
-   - Timeout: 1 second to collect all responses
-
-8. **GETROOT** - Get root structure (convenience wrapper for GETALL /V1/*)
-   - Parameters: none
-   - Returns: Same structured JSON as GETALL
-
-9. **CALL** - Execute a method
-   - Parameters:
-     - `nodepath` (required): e.g., `/V1/EDID`
-     - `method` (required): e.g., `switchAll`
-     - `params` (optional): e.g., `F49`
-   - Constructs: `CALL /V1/EDID:switchAll(F49)`
-
-10. **OPEN** - Open a subscription to a property
-    - Parameters:
-      - `nodepath` (required): e.g., `/V1/EDID`
-      - `property` (required): e.g., `EdidStatus`
-    - Constructs: `OPEN /V1/EDID.EdidStatus`
-
-11. **MAN** - Get manual/documentation
-    - Parameters:
-      - `nodepath` (required): e.g., `/V1/MEDIA/VIDEO/O1`
-      - `item` (required): property or method name, e.g., `Output5VMode`
-    - Constructs: `MAN /V1/MEDIA/VIDEO/O1.Output5VMode`
-
-## LW3 Protocol Details
-
-### Protocol Basics
-- **Port**: 6107 (default)
-- **Format**: Line-based text protocol
-- **Encoding**: UTF-8
-- **Line Terminator**: `\n`
-
-### Command Format (as sent to device)
-- GET: `GET <nodepath.property>` (e.g., `/V1/EDID.EdidStatus`)
-- SET: `SET <nodepath.property>=<value>` (e.g., `/V1/MANAGEMENT/NETWORK.HostName=jimmy-hc40`)
-- GETALL: `GETALL <nodepath>` (e.g., `/V1/MANAGEMENT/NETWORK`)
-- CALL: `CALL <nodepath:method(params)>` (e.g., `/V1/EDID:switchAll(F49)`)
-- OPEN: `OPEN <nodepath.property>` (e.g., `/V1/EDID.EdidStatus`)
-- MAN: `MAN <nodepath.property>` (e.g., `/V1/MEDIA/VIDEO/O1.Output5VMode`)
-
-### Response Format
-- **Read-only property**: `pr <property>=<value>`
-- **Read-write property**: `pw <property>=<value>`
-- **Method indicator (in GETALL)**: `m- <method>`
-- **Method execution success**: `mO <nodepath:method>` (CALL response)
-- **Method error**: `mE <method> %E###: error message` (CALL error)
-- **Node indicator (in GETALL)**: `n- <path>`
-- **Property error**: `pE <property> %E###: error message`
-- **General error**: `er<error_code>`
-
-### GETALL/GETROOT Response Structure
-
-Returns structured JSON with **separated nodepath and property/method names**:
-
-```json
-{
-  "properties": [
-    {
-      "nodepath": "/V1/MANAGEMENT/NETWORK",
-      "property": "HostName",
-      "value": "jimmy-hc40",
-      "writable": true
-    },
-    {
-      "nodepath": "/V1/MANAGEMENT/NETWORK",
-      "property": "IpAddress",
-      "value": "192.168.2.109",
-      "writable": false
-    }
-  ],
-  "nodes": [
-    "/V1/MANAGEMENT/NETWORK/AUTH",
-    "/V1/MANAGEMENT/NETWORK/SERVICES"
-  ],
-  "methods": [
-    {
-      "nodepath": "/V1/MANAGEMENT/NETWORK",
-      "method": "applySettings"
-    }
-  ]
-}
+```js
+const firstPending = this.pendingCommands.values().next().value;
 ```
 
-**Benefits of separated structure:**
-- Property values can be directly used as GET/SET/OPEN parameters
-- Method values can be directly used as CALL parameters
-- No need to parse paths manually
+Consequences to respect when changing anything:
+- Commands must be issued strictly one at a time. Two concurrent `sendCommand()` calls will cross-resolve.
+- A `collectMultiple` (GETALL) entry sitting at the head of the queue swallows every `pr`/`pw`/`n-`/`m-` line that arrives during its window, including unrelated ones.
+- Unsolicited device output (subscription updates from `OPEN`, banners) is emitted as a `response` event **and** consumed by whatever command is at the head of the queue.
 
-### Timeouts
-- **Standard commands**: 5 seconds (GET, SET, CALL, OPEN, MAN)
-- **GETALL/GETROOT**: 1 second (to collect multiple responses)
+If you ever need pipelining, the fix is real request/response correlation (LW3 signature prefixes), not a bigger queue.
 
-## Development Workflow
+### Two different completion strategies
 
-### Installation
-```bash
-npm install
+- **Single-line commands** (GET/SET/CALL/OPEN/MAN): resolve on the first line received; reject if it starts with `pE `, `mE `, or `er`. 5-second timeout.
+- **GETALL/GETROOT**: no terminator is recognised — the promise resolves on a **fixed 1-second timer** in `getAll()`, after which collected lines are parsed. Every GETALL costs ~1s of wall clock regardless of device speed, and a slow device can have lines truncated. An error line arriving during the window aborts the whole collection.
+
+### Response grammar (parsed in `getAll()` / `processResponse()`)
+
+```
+pr /nodepath.Prop=value     read-only property   -> {nodepath, property, value, writable:false}
+pw /nodepath.Prop=value     read-write property  -> {nodepath, property, value, writable:true}
+n- /path/child              child node           -> nodes[]
+m- /nodepath:method         method               -> {nodepath, method}
+mO /nodepath:method         CALL succeeded
+pE|mE ... %E###: message    property/method error
+er<code>                    general error
 ```
 
-### Running the Server
-```bash
-npm start
-```
+Property lines are split with `/^p[rw] (.+?)\.([^=]+)=(.*)$/` (non-greedy path, so the **last** dot before `=` separates node from property). Only the four collectible prefixes above survive GETALL parsing; anything else in the window is dropped silently.
 
-### Development Mode (with auto-reload)
-```bash
-npm run dev
-```
+Raw single-line commands return the **whole response line**, not the value. `GET /V1/EDID.EdidStatus` yields the literal `pw /V1/EDID.EdidStatus=...`, and `handleGet` wraps that unparsed into its text output. Callers wanting a bare value must strip the prefix themselves.
 
-### Testing with MCP Inspector
-```bash
-npx @modelcontextprotocol/inspector node src/index.js
-```
+### Discovery constraints
 
-### Using with Claude Desktop
+`discover` queries PTR for `_lwr3._tcp.local`, `_lara-https._tcp.local`, `_webldc-http._tcp.local`, `_rest-http._tcp.local`, then chases SRV → A. A device is reported **only** when `modelName`, `serialNumber`, and `ipAddress` have all arrived within the timeout (default 3000 ms), and only when the mDNS instance name matches `PRODUCT-NAME SERIAL` (`/^([\w-]+)\s+([A-F0-9]+)$/i`). Devices advertising other name shapes are dropped without warning. Results are keyed `modelName_serialNumber`.
 
-Add to your Claude Desktop MCP configuration:
-```json
-{
-  "mcpServers": {
-    "lightware": {
-      "command": "node",
-      "args": ["c:\\Taurus\\mcp-lw3\\src\\index.js"]
-    }
-  }
-}
-```
+## Constraints when editing
 
-## Example Usage Flow
-
-1. **Discover devices on the network:**
-   ```
-   Tool: discover
-   Parameters: { "timeout": 3000 }
-   Returns: [
-     {
-       "modelName": "UCX-4x3-HC40",
-       "serialNumber": "D4349200",
-       "ipAddress": "192.168.2.109",
-       "hostname": "jimmy-hc40.local"
-     },
-     ...
-   ]
-   ```
-
-2. **Connect to device:**
-   ```
-   Tool: connect
-   Parameters: { "host": "jimmy-hc40.local" }
-   ```
-
-3. **Get root structure:**
-   ```
-   Tool: GETROOT
-   Parameters: {}
-   Returns: JSON with all root properties, nodes, and methods
-   ```
-
-4. **Read a property:**
-   ```
-   Tool: GET
-   Parameters: { "nodepath": "/V1/EDID", "property": "EdidStatus" }
-   Returns: "D1:E1;D1:E2;D1:E3;D1:E4"
-   ```
-
-5. **Set a property:**
-   ```
-   Tool: SET
-   Parameters: {
-     "nodepath": "/V1/MANAGEMENT/NETWORK",
-     "property": "HostName",
-     "value": "jimmy-hc40"
-   }
-   ```
-
-6. **Call a method:**
-   ```
-   Tool: CALL
-   Parameters: {
-     "nodepath": "/V1/EDID",
-     "method": "switchAll",
-     "params": "F49"
-   }
-   Constructs: CALL /V1/EDID:switchAll(F49)
-   ```
-
-7. **Get documentation:**
-   ```
-   Tool: MAN
-   Parameters: {
-     "nodepath": "/V1/MEDIA/VIDEO/O1",
-     "item": "Output5VMode"
-   }
-   Returns: Manual text describing the property
-   ```
-
-## Error Handling
-
-The server handles multiple error types from the LW3 protocol:
-- **Property errors** (`pE`): Invalid property access, non-existent properties
-- **Method errors** (`mE`): Invalid method calls, invalid parameters
-- **General errors** (`er`): Protocol-level errors
-
-All errors are returned as error messages to the MCP client.
-
-## Important Files
-
-- **[package.json](package.json)**: Project metadata, name is `lw3-mcp`
-- **[.gitignore](.gitignore)**: Excludes node_modules and logs
-- **[test-connection.js](test-connection.js)**: Test script for direct LW3 protocol testing
-
-## Conventions
-
-- **ES6 modules**: Uses `type: "module"` in package.json
-- **Error logging**: Errors logged to stderr
-- **Connection lifecycle**: Connection maintained throughout MCP session, clean disconnection on SIGINT
-- **Separated parameters**: All tools use separate nodepath/property parameters for clarity
-- **Path separators**:
-  - Properties use `.` (dot): `nodepath.property`
-  - Methods use `:` (colon): `nodepath:method`
+- **stdout belongs to the MCP stdio transport.** All logging goes to stderr via `console.error`; a stray `console.log` corrupts the protocol stream.
+- Tool failures are returned as ordinary text content (`Error: <message>`) from the `CallToolRequestSchema` catch block, not as MCP protocol errors — no `isError` flag is set. Keep new tools consistent or change it deliberately everywhere.
+- `connect` refuses when already connected (checked in both `handleConnect` and `LW3Protocol.connect`); there is no reconnect logic and no keepalive.
+- ES modules (`"type": "module"`); use `.js` extensions in imports.
+- Adding a tool means three coordinated edits in `index.js`: the `ListToolsRequestSchema` entry, the `switch` case, and the `handleX` method. Command handlers that touch the device must call `this.ensureConnected()` first.
