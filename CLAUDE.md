@@ -13,12 +13,11 @@ npm install
 npm start                                          # run the server on stdio
 npm run dev                                         # same, with --watch
 npx @modelcontextprotocol/inspector node src/index.js   # interactive tool testing
-node test-connection.js                             # direct protocol smoke test (needs a real device)
 ```
 
-There is no test framework, linter, or build step. `test-connection.js` is a hand-run script against a hardcoded host (`jimmy-hc40.local`) and is **stale**: it treats the `getAll()` result as an array, but `getAll()` now returns `{properties, nodes, methods}`. Fix or ignore that section when using it.
+There is no test framework, linter, or build step, and no smoke-test script since `test-connection.js` was removed in `452e975`. The MCP Inspector is the practical way to exercise tools against a real device.
 
-`cursor_config.json` (untracked) is a sample MCP client registration pointing at `C:\Taurus\lw3-mcp\src\index.js`.
+`cursor_config.json` is a sample MCP client registration pointing at `C:\Taurus\lw3-mcp\src\index.js`.
 
 ## Architecture
 
