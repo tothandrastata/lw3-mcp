@@ -95,6 +95,40 @@ test('builds a device from records arriving across two interfaces', async () => 
   }], 'the same device on two interfaces is one entry, not two');
 });
 
+test('a PTR for a service type we did not query is ignored', async () => {
+  const { discovery, sockets } = build(['192.168.2.101']);
+  const p = discovery.discover(150);
+  sockets[0].respond([
+    { type: 'PTR', name: '_googlecast._tcp.local',
+      data: 'd9d84bbe-0c29-910f-db15-e6b9fcc04173._googlecast._tcp.local' },
+    { type: 'PTR', name: '_lwr3-wss._tcp.local',
+      data: 'UCX-4x2-HC30 00001234._lwr3-wss._tcp.local' },
+  ]);
+  const devices = await p;
+  assert.deepEqual(devices, [{
+    modelName: 'UCX-4x2-HC30', serialNumber: '00001234',
+    ipAddress: null, hostname: null,
+  }], 'mDNS is broadcast: an unsolicited _googlecast PTR must not become a phantom device');
+});
+
+test('a service type learned from the enumeration is still accepted, foreign types still rejected', async () => {
+  const { discovery, sockets } = build(['192.168.2.101']);
+  const p = discovery.discover(150);
+  sockets[0].respond([
+    { type: 'PTR', name: SERVICE_ENUMERATION, data: '_lwr3-brandnew._tcp.local' },
+  ]);
+  sockets[0].respond([
+    { type: 'PTR', name: '_googlecast._tcp.local', data: 'foreign-cast._googlecast._tcp.local' },
+    { type: 'PTR', name: '_lwr3-brandnew._tcp.local',
+      data: 'UCX-9000 ABCDEF01._lwr3-brandnew._tcp.local' },
+  ]);
+  const devices = await p;
+  assert.deepEqual(devices, [{
+    modelName: 'UCX-9000', serialNumber: 'ABCDEF01',
+    ipAddress: null, hostname: null,
+  }], 'a Lightware-shaped type learned via the enumeration must still be queried and accepted');
+});
+
 test('every socket is destroyed when the scan ends', async () => {
   const { discovery, sockets } = build(['192.168.2.101', '172.22.240.1']);
   await discovery.discover(150);

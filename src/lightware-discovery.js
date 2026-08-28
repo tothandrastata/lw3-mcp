@@ -223,16 +223,27 @@ export class LightwareDiscovery extends EventEmitter {
         continue;
       }
 
+      // mDNS is broadcast: this response event fires for every announcement on
+      // the segment, not only for answers to our own questions. A PTR/SRV only
+      // describes a Lightware device when it answers a service type we asked
+      // about (this.serviceTypes) — otherwise it's a foreign device (a
+      // Chromecast, a smart plug, ...) that happened to also be on the wire.
       if (record.type === 'PTR') {
-        this.registry.noteInstance(String(record.data));
+        if (this.serviceTypes.has(String(record.name))) {
+          this.registry.noteInstance(String(record.data));
+        }
         continue;
       }
 
       if (record.type === 'SRV' && record.data.target) {
-        this.registry.noteHostname(String(record.name), record.data.target);
-        try {
-          socket.query({ questions: [{ name: record.data.target, type: 'A' }] });
-        } catch { /* closing */ }
+        const instanceName = String(record.name);
+        const serviceType = instanceName.slice(instanceName.indexOf('.') + 1);
+        if (this.serviceTypes.has(serviceType)) {
+          this.registry.noteHostname(instanceName, record.data.target);
+          try {
+            socket.query({ questions: [{ name: record.data.target, type: 'A' }] });
+          } catch { /* closing */ }
+        }
         continue;
       }
 
