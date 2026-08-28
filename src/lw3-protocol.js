@@ -1,14 +1,21 @@
-import net from 'net';
-import { EventEmitter } from 'events';
+import { EventEmitter } from 'node:events';
+import { TcpTransport } from './transports/tcp.js';
+import { WssTransport, AuthRequiredError } from './transports/wss.js';
 
 /**
  * LW3 Protocol Handler
  * Handles communication with Lightware devices using the LW3 protocol
  */
 export class LW3Protocol extends EventEmitter {
-  constructor() {
+  /**
+   * @param {object} [factories] - transport constructors, injectable for tests
+   */
+  constructor(factories = {}) {
     super();
-    this.socket = null;
+    this.createTcp = factories.createTcp || ((host, port) => new TcpTransport(host, port));
+    this.createWss = factories.createWss || ((host, password) => new WssTransport(host, password));
+    this.transport = null;
+    this.transportKind = null;
     this.connected = false;
     this.host = null;
     this.port = null;
@@ -18,76 +25,83 @@ export class LW3Protocol extends EventEmitter {
   }
 
   /**
-   * Connect to a Lightware device
-   * @param {string} host - Device IP address or hostname
-   * @param {number} port - Device port (default: 6107 for LW3)
-   * @returns {Promise<void>}
+   * Connect to a device: TCP first, secure WebSocket as a fallback.
+   * @param {string} host
+   * @param {number} [port] - TCP port, default 6107
+   * @param {{password?: string}} [options] - admin password, if the device requires one
    */
-  connect(host, port = 6107) {
-    return new Promise((resolve, reject) => {
-      if (this.connected) {
-        reject(new Error('Already connected to a device'));
-        return;
-      }
+  async connect(host, port = 6107, options = {}) {
+    if (this.connected) throw new Error('Already connected to a device');
 
-      this.host = host;
-      this.port = port;
-      this.socket = new net.Socket();
+    let tcpFailure;
+    const tcp = this.createTcp(host, port);
+    try {
+      await tcp.connect();
+      this.attachTransport(tcp, 'tcp', host, port);
+      return;
+    } catch (error) {
+      tcpFailure = error;
+    }
 
-      this.socket.on('connect', () => {
-        this.connected = true;
-        this.emit('connected', { host, port });
-        resolve();
-      });
+    const wss = this.createWss(host, options.password);
+    try {
+      await wss.connect();
+      this.attachTransport(wss, 'wss', host, 443);
+      return;
+    } catch (error) {
+      // An auth challenge is actionable on its own: the caller asks the user
+      // for a password. Burying it in a combined message would hide that.
+      if (error instanceof AuthRequiredError || error.name === 'AuthRequiredError') throw error;
+      throw new Error(
+        `Could not connect to ${host}.\n` +
+          `  TCP: ${tcpFailure.message}\n` +
+          `  WSS: ${error.message}`
+      );
+    }
+  }
 
-      this.socket.on('data', (data) => {
-        this.handleData(data);
-      });
+  /**
+   * Wire a connected transport into the protocol layer.
+   */
+  attachTransport(transport, kind, host, port) {
+    this.transport = transport;
+    this.transportKind = kind;
+    this.host = host;
+    this.port = port;
+    this.connected = true;
 
-      this.socket.on('error', (error) => {
-        this.emit('error', error);
-        reject(error);
-      });
-
-      this.socket.on('close', () => {
-        this.connected = false;
-        this.emit('disconnected');
-      });
-
-      this.socket.connect(port, host);
+    transport.on('data', (chunk) => this.handleData(chunk));
+    transport.on('error', (error) => this.emit('error', error));
+    transport.on('close', () => {
+      this.connected = false;
+      this.emit('disconnected');
     });
+
+    this.emit('connected', { host, port, transport: kind });
   }
 
   /**
    * Disconnect from the device
    */
-  disconnect() {
-    return new Promise((resolve) => {
-      if (!this.socket) {
-        resolve();
-        return;
-      }
-
-      this.socket.once('close', () => {
-        this.socket = null;
-        this.connected = false;
-        this.buffer = '';
-        this.pendingCommands.clear();
-        resolve();
-      });
-
-      this.socket.end();
-    });
+  async disconnect() {
+    if (!this.transport) return;
+    await this.transport.close();
+    this.transport = null;
+    this.transportKind = null;
+    this.connected = false;
+    this.buffer = '';
+    this.pendingCommands.clear();
   }
 
   /**
-   * Handle incoming data from the device
-   * @param {Buffer} data
+   * Buffer incoming text and split it into LW3 lines.
+   * Lines arrive `\r\n`-terminated over WSS and `\n`-terminated over TCP;
+   * trim() absorbs the difference.
+   * @param {string} chunk
    */
-  handleData(data) {
-    this.buffer += data.toString();
+  handleData(chunk) {
+    this.buffer += chunk;
 
-    // LW3 protocol uses line-based messages
     let newlineIndex;
     while ((newlineIndex = this.buffer.indexOf('\n')) !== -1) {
       const line = this.buffer.substring(0, newlineIndex).trim();
@@ -151,7 +165,7 @@ export class LW3Protocol extends EventEmitter {
    */
   sendCommand(command) {
     return new Promise((resolve, reject) => {
-      if (!this.connected || !this.socket) {
+      if (!this.connected || !this.transport) {
         reject(new Error('Not connected to a device'));
         return;
       }
@@ -159,15 +173,15 @@ export class LW3Protocol extends EventEmitter {
       const id = this.commandId++;
       this.pendingCommands.set(id, { id, resolve, reject });
 
-      // Add newline if not present
       const cmd = command.endsWith('\n') ? command : command + '\n';
 
-      this.socket.write(cmd, (error) => {
-        if (error) {
-          this.pendingCommands.delete(id);
-          reject(error);
-        }
-      });
+      try {
+        this.transport.send(cmd);
+      } catch (error) {
+        this.pendingCommands.delete(id);
+        reject(error);
+        return;
+      }
 
       // Timeout after 5 seconds
       setTimeout(() => {
@@ -210,7 +224,7 @@ export class LW3Protocol extends EventEmitter {
     const command = path ? `GETALL ${path}` : 'GETALL';
 
     return new Promise((resolve, reject) => {
-      if (!this.connected || !this.socket) {
+      if (!this.connected || !this.transport) {
         reject(new Error('Not connected to a device'));
         return;
       }
@@ -221,18 +235,18 @@ export class LW3Protocol extends EventEmitter {
         resolve,
         reject,
         collectMultiple: true,
-        responses: []
+        responses: [],
       });
 
-      // Add newline if not present
       const cmd = command.endsWith('\n') ? command : command + '\n';
 
-      this.socket.write(cmd, (error) => {
-        if (error) {
-          this.pendingCommands.delete(id);
-          reject(error);
-        }
-      });
+      try {
+        this.transport.send(cmd);
+      } catch (error) {
+        this.pendingCommands.delete(id);
+        reject(error);
+        return;
+      }
 
       // GETALL: Wait 1 second to collect all responses, then parse and resolve
       setTimeout(() => {
@@ -342,13 +356,12 @@ export class LW3Protocol extends EventEmitter {
    * @returns {object|null}
    */
   getConnectionInfo() {
-    if (!this.connected) {
-      return null;
-    }
+    if (!this.connected) return null;
     return {
       host: this.host,
       port: this.port,
-      connected: this.connected
+      connected: this.connected,
+      transport: this.transportKind,
     };
   }
 }
