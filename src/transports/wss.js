@@ -1,5 +1,6 @@
 import WebSocket from 'ws';
 import { EventEmitter } from 'node:events';
+import { CONNECT_TIMEOUT_MS } from './tcp.js';
 
 export const WSS_PATH = '/lw3';
 export const WSS_USER = 'admin';
@@ -51,6 +52,7 @@ export class WssTransport extends EventEmitter {
     this.password = password;
     this.url = `wss://${host}${WSS_PATH}`;
     this.ws = null;
+    this.timeoutMs = CONNECT_TIMEOUT_MS;
   }
 
   headers() {
@@ -64,6 +66,7 @@ export class WssTransport extends EventEmitter {
       const ws = new WebSocket(this.url, {
         headers: this.headers(),
         rejectUnauthorized: false,
+        handshakeTimeout: this.timeoutMs,
       });
       this.ws = ws;
       let settled = false;

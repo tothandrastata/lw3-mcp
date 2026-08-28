@@ -174,6 +174,25 @@ test('AuthRequiredError distinguishes "no password yet" from "password rejected"
   assert.notEqual(first.message, retry.message);
 });
 
+// Regression test: `ws` has no default handshake timeout, so a silently
+// dropped connection (VPN/firewall swallowing traffic, no RST or FIN ever
+// arrives) waits on the OS instead of failing fast. Since TcpTransport now
+// fails after 3s and WSS runs as the fallback leg, an unbounded WSS handshake
+// would mean the overall connect() can still hang far longer than intended —
+// exactly the failure mode the timeout was supposed to eliminate. Points at
+// TEST-NET-2 (RFC 5737), the same routable-but-silent address the TCP tests
+// use, so this never depends on network flakiness or a real device.
+test('connect() rejects instead of hanging when the peer never answers', async () => {
+  const t = new WssTransport('198.51.100.1', undefined);
+  t.url = 'ws://198.51.100.1:6107/lw3';
+  t.timeoutMs = 150; // keep the test fast; production uses CONNECT_TIMEOUT_MS
+
+  const hang = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('connect() hung past the handshake timeout')), 2000)
+  );
+  await Promise.race([assert.rejects(() => t.connect()), hang]);
+});
+
 test('no error message leaks the password', () => {
   const t = new WssTransport('device.local', 'hunter2');
   const messages = [

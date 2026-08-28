@@ -474,7 +474,7 @@ class LW3MCPServer {
       content: [
         {
           type: 'text',
-          text: `Status: Connected\nHost: ${info.host}\nPort: ${info.port}`,
+          text: `Status: Connected\nHost: ${info.host}\nPort: ${info.port}\nTransport: ${info.transport}`,
         },
       ],
     };

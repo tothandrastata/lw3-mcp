@@ -22,9 +22,12 @@ export const REQUIRED_ENTRIES = [
   'src/index.js',
   'src/lw3-protocol.js',
   'src/lightware-discovery.js',
+  'src/transports/tcp.js',
+  'src/transports/wss.js',
   'assets/icon.png',
   'node_modules/@modelcontextprotocol/sdk/package.json',
   'node_modules/multicast-dns/package.json',
+  'node_modules/ws/package.json',
 ];
 
 export function assertRequiredEntries(entries) {
