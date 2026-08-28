@@ -54,10 +54,21 @@ export class WssTransport extends EventEmitter {
       this.ws = ws;
       let settled = false;
 
+      // Rejects the connect() promise. Only wired up for the duration of the
+      // connect attempt — removed once 'open' fires so a post-connect error
+      // doesn't run this dead branch on top of the real error handler.
+      const onConnectError = (err) => fail(new Error(`${this.url} — ${err.message}`));
+
       const fail = (err) => {
         if (settled) return;
         settled = true;
         ws.removeAllListeners();
+        // terminate() emits 'error' asynchronously even when the socket
+        // never finished connecting. Without a listener attached, that
+        // 'error' event is unhandled and Node throws, crashing the whole
+        // process — after the promise has already rejected, so nothing here
+        // can catch it. Keep a no-op listener in place across teardown.
+        ws.on('error', () => {});
         ws.terminate();
         reject(err);
       };
@@ -67,11 +78,12 @@ export class WssTransport extends EventEmitter {
         else fail(new Error(`${this.url} — HTTP ${res.statusCode}`));
       });
 
-      ws.on('error', (err) => fail(new Error(`${this.url} — ${err.message}`)));
+      ws.on('error', onConnectError);
 
       ws.on('open', () => {
         if (settled) return;
         settled = true;
+        ws.off('error', onConnectError);
         ws.on('message', (data) => this.emit('data', data.toString()));
         ws.on('close', () => this.emit('close'));
         ws.on('error', (err) => this.emit('error', err));
