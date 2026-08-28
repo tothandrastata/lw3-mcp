@@ -17,7 +17,10 @@
 - **ES modules only.** `package.json` has `"type": "module"`; use `import`, and include `.js` extensions in relative imports.
 - **Pin the packer to `@anthropic-ai/mcpb@2.1.2`.** Never `@latest` in a script; a schema change upstream must not silently alter builds.
 - **The literal `${__dirname}` in `manifest.json` must survive verbatim** into the packed file. It is expanded by Claude Desktop at install time, not by any shell or by Node.
-- **Windows-first.** Development and builds happen on Windows. When spawning `npm` or `npx` from Node, resolve `npm.cmd` / `npx.cmd` on `win32`, otherwise `execFileSync` fails with ENOENT.
+- **Windows-first.** Development and builds happen on Windows. Spawning `npm` or `npx` from Node needs three things on `win32`, all of them verified on this machine (Node 22.20):
+  1. Resolve `npm.cmd` / `npx.cmd`, or `execFileSync` fails with `ENOENT`.
+  2. Pass `shell: true`, or it fails with `EINVAL`. Node 20.12+ refuses to spawn `.cmd` and `.bat` directly (the CVE-2024-27980 hardening).
+  3. Quote any path argument, because `shell: true` routes through `cmd.exe`, which splits arguments on spaces. An unquoted `C:\...\space test dir` arrives truncated at the first space.
 - **Node floor is `>=18.0.0`,** declared in `manifest.json` under `compatibility.runtimes.node`.
 
 ## Verified Facts
@@ -254,7 +257,13 @@ import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 
 const MCPB = '@anthropic-ai/mcpb@2.1.2';
-const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+const isWin = process.platform === 'win32';
+const npx = isWin ? 'npx.cmd' : 'npx';
+
+// Node 20.12+ refuses to spawn .cmd/.bat without shell:true (the
+// CVE-2024-27980 hardening), and shell:true routes through cmd.exe, which
+// splits arguments on spaces. So on Windows: shell on, path arguments quoted.
+const quoteArg = (arg) => (isWin ? `"${arg}"` : arg);
 
 export const REQUIRED_ENTRIES = [
   'manifest.json',
@@ -355,7 +364,10 @@ function listTools(entryPoint) {
 export async function verifyBundle(mcpbPath) {
   const workdir = mkdtempSync(join(tmpdir(), 'lw3-mcpb-'));
   try {
-    execFileSync(npx, ['-y', MCPB, 'unpack', mcpbPath, workdir], { stdio: 'pipe' });
+    execFileSync(npx, ['-y', MCPB, 'unpack', quoteArg(mcpbPath), quoteArg(workdir)], {
+      stdio: 'pipe',
+      shell: isWin,
+    });
     const root = findBundleRoot(workdir);
 
     assertRequiredEntries(listFilesRecursive(root));
@@ -453,7 +465,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const outFile = join(root, 'dist', `lw3-mcp-${pkg.version}.mcpb`);
 
-const run = (cmd, args) => execFileSync(cmd, args, { cwd: root, stdio: 'inherit' });
+// shell:true is required on Windows to spawn .cmd at all; quoting is required
+// because shell:true splits arguments on spaces. See Global Constraints.
+const quoteArg = (arg) => (isWin ? `"${arg}"` : arg);
+const run = (cmd, args) => execFileSync(cmd, args, { cwd: root, stdio: 'inherit', shell: isWin });
 
 console.log(`Building lw3-mcp ${pkg.version}`);
 
@@ -465,7 +480,7 @@ run(npx, ['-y', MCPB, 'validate', 'manifest.json']);
 
 console.log('\n[3/4] Packing');
 mkdirSync(join(root, 'dist'), { recursive: true });
-run(npx, ['-y', MCPB, 'pack', '.', outFile]);
+run(npx, ['-y', MCPB, 'pack', '.', quoteArg(outFile)]);
 
 if (!existsSync(outFile)) {
   throw new Error(`Packer reported success but ${outFile} does not exist`);
