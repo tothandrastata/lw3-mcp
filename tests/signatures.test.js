@@ -126,6 +126,41 @@ test('a value containing digits and a colon is not mistaken for an error', async
   assert.deepEqual(await p, [line]);
 });
 
+test('a bare "er" general-error line rejects instead of resolving as a value', async () => {
+  const { lw3, transport } = await connected();
+  const p = lw3.sendCommand('GET /V1/X.Y');
+  const s = sigOf(transport);
+  transport.reply(`{${s}`, 'er 3', '}');
+  await assert.rejects(() => p, (err) => {
+    assert.match(err.message, /er 3/, 'the error should name the offending line');
+    return true;
+  });
+});
+
+test('%E errors still reject after widening general-error detection', async () => {
+  const { lw3, transport } = await connected();
+  const p = lw3.sendCommand('GET /V1/X.Y');
+  const s = sigOf(transport);
+  transport.reply(`{${s}`, 'pE /V1/X.Y %E002: Not exists', '}');
+  await assert.rejects(() => p, /%E\d+:/);
+});
+
+test('a property or value that merely starts with "er" is not mistaken for a general error', async () => {
+  const { lw3, transport } = await connected();
+  const p = lw3.sendCommand('GET /V1/X.ErrorCount');
+  const s = sigOf(transport);
+  transport.reply(`{${s}`, 'pw /V1/X.ErrorCount=0', '}');
+  assert.deepEqual(await p, ['pw /V1/X.ErrorCount=0']);
+});
+
+test('a value beginning "er" but not a general-error shape is not mistaken for one', async () => {
+  const { lw3, transport } = await connected();
+  const p = lw3.sendCommand('GET /V1/X.Y');
+  const s = sigOf(transport);
+  transport.reply(`{${s}`, 'pr /V1/X.Y=ergonomic', '}');
+  assert.deepEqual(await p, ['pr /V1/X.Y=ergonomic']);
+});
+
 test('rejects with a timeout if the block never closes', async () => {
   const { lw3, transport } = await connected();
   const p = lw3.sendCommand('GET /V1/X.Y');
@@ -183,6 +218,37 @@ test('the reported bug: two GETALLs on one node, neither empty nor doubled', asy
     assert.equal(r.properties.length, 4, `${label} call: the node has 4 properties`);
     assert.equal(r.methods.length, 1, `${label} call: 1 method`);
     assert.equal(r.nodes.length, 1, `${label} call: 1 child node`);
+  }
+});
+
+test('disconnect() rejects an in-flight command instead of leaving it pending forever', async () => {
+  const { lw3, transport } = await connected();
+  const p = lw3.sendCommand('GET /V1/X.Y');
+  // No reply is ever delivered — this command is in flight when disconnect() runs.
+
+  await lw3.disconnect();
+
+  // Guard against the regression: if disconnect() no longer settles the
+  // promise, `p` hangs forever. Race it against a short timer so the
+  // regression fails this test instead of hanging the whole suite.
+  let guardTimer;
+  const guard = new Promise((_, reject) => {
+    guardTimer = setTimeout(
+      () => reject(new Error('REGRESSION_TIMEOUT: command promise never settled after disconnect()')),
+      500
+    );
+  });
+
+  try {
+    await assert.rejects(() => Promise.race([p, guard]), (err) => {
+      assert.ok(!/REGRESSION_TIMEOUT/.test(err.message),
+        'the command promise never settled after disconnect() - this is the bug Fix 3 addresses');
+      assert.match(err.message, /closed|disconnect/i,
+        'the rejection should explain the connection closed while the command was in flight');
+      return true;
+    });
+  } finally {
+    clearTimeout(guardTimer);
   }
 });
 

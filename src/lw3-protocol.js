@@ -9,6 +9,20 @@ export const COMMAND_TIMEOUT_MS = 5000;
 const DEVICE_ERROR = /%E\d+:/;
 
 /**
+ * A bare general-error line, e.g. `er 3` or `er003` — no `%E` marker of its own.
+ * Anchored at the start of the line, and requires the character right after
+ * `er` to be a digit or whitespace, so a property or value that merely starts
+ * with those two letters (`error`, `ergonomic`, `ErrorCount`) is not mistaken
+ * for one.
+ */
+const GENERAL_ERROR = /^er[\s\d]/;
+
+/** True if a reply line reports a device error, by either shape. */
+function isErrorLine(line) {
+  return DEVICE_ERROR.test(line) || GENERAL_ERROR.test(line);
+}
+
+/**
  * Turn the lines of a GETALL reply into structured form.
  * Lifted verbatim out of getAll's timer callback; the parsing itself is unchanged.
  */
@@ -137,6 +151,12 @@ export class LW3Protocol extends EventEmitter {
     this.transportKind = null;
     this.connected = false;
     this.buffer = '';
+    this.currentBlock = null;
+
+    for (const pending of this.pendingCommands.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(`Connection closed while command was in flight: ${pending.signature}`));
+    }
     this.pendingCommands.clear();
   }
 
@@ -196,7 +216,7 @@ export class LW3Protocol extends EventEmitter {
       this.pendingCommands.delete(signature);
       clearTimeout(pending.timer);
 
-      const failure = pending.lines.find((l) => DEVICE_ERROR.test(l));
+      const failure = pending.lines.find((l) => isErrorLine(l));
       if (failure) pending.reject(new Error(`Device error: ${failure}`));
       else pending.resolve(pending.lines);
       return;

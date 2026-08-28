@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm install
 npm start                                          # run the server on stdio
 npm run dev                                         # same, with --watch
-npm test                                            # 56 tests, node:test — no framework, no config
+npm test                                            # 61 tests, node:test — no framework, no config
 npm run bundle                                      # build dist/lw3-mcp-<version>.mcpb (scripts/bundle.js)
 npx @modelcontextprotocol/inspector node src/index.js   # interactive tool testing
 ```
@@ -56,9 +56,9 @@ const pending = this.pendingCommands.get(signature);
 
 Consequences:
 - A reply that arrives out of order still resolves the command that asked for it; a late reply can no longer land on the wrong command.
-- A line arriving outside any open block is unsolicited — a subscription `CHG` update, a banner — and is emitted as an `unsolicited` event, never treated as a reply.
-- Device errors are detected by the `%E<digits>:` marker (`DEVICE_ERROR` regex) anywhere in a block's lines, not by a prefix list, so `pE`, `mE`, and `-E` all reject the same way. The old prefix check reported `-E` errors as successful values.
-- Commands are still issued one at a time in this codebase (`index.js` awaits each call before making the next), but that's a choice, not a limitation of `sendCommand()` — it already tolerates concurrent, out-of-order replies.
+- A line arriving outside any open block is unsolicited — a subscription `CHG` update, a banner — and is emitted as an `unsolicited` event, never treated as a reply. So is a line arriving *inside* an open block whose signature has no pending command (e.g. one that already timed out): its lines are emitted as `unsolicited` too, not silently dropped.
+- Device errors are detected by the `%E<digits>:` marker (`DEVICE_ERROR` regex) anywhere in a block's lines, not by a prefix list, so `pE`, `mE`, and `-E` all reject the same way. The old prefix check reported `-E` errors as successful values. A bare `er<code>` general error carries no `%E` marker of its own, so it's caught separately by `GENERAL_ERROR` (`/^er[\s\d]/`, anchored so `error`/`ergonomic`/`ErrorCount` don't false-positive); `isErrorLine()` checks both.
+- Commands are still issued one at a time in this codebase (`index.js` awaits each call before making the next), but that's a choice, not a limitation of `sendCommand()` — it already tolerates whole reply blocks arriving out of order. It does **not** tolerate interleaved blocks: there is a single `currentBlock`, so a second `{XXXX` opening while one is already open orphans the pending command for the first, which then settles only by timing out 5 seconds later. Pipelining commands against this implementation is unsafe for that reason.
 
 ### One completion strategy for every command
 
@@ -66,7 +66,7 @@ Consequences:
 
 `getAll()`/`getRoot()` differ only in what happens *after* the lines come back: `parseGetAll()` sorts them into `{properties, nodes, methods}`. There's no fixed wait — a GETALL against `/V1/MANAGEMENT/DATETIME` measured 20–25 ms against real hardware, down from the old fixed 1000 ms, and an empty result now means an empty node rather than "nothing arrived within one second".
 
-### Response grammar (parsed in `getAll()` / `processResponse()`)
+### Response grammar (parsed in `parseGetAll()`)
 
 ```
 pr /nodepath.Prop=value     read-only property   -> {nodepath, property, value, writable:false}
@@ -78,7 +78,7 @@ pE|mE ... %E###: message    property/method error
 er<code>                    general error
 ```
 
-Property lines are split with `/^p[rw] (.+?)\.([^=]+)=(.*)$/` (non-greedy path, so the **last** dot before `=` separates node from property). Only the four collectible prefixes above survive GETALL parsing; anything else in the window is dropped silently.
+Property lines are split with `/^p[rw] (.+?)\.([^=]+)=(.*)$/` (non-greedy path, so the **last** dot before `=` separates node from property). Only the four collectible prefixes above survive GETALL parsing; anything else in the block is dropped silently.
 
 `get`/`set`/`call`/`man` return the **raw lines of the reply block**, joined with `\n`, not a parsed value. `GET /V1/EDID.EdidStatus` yields the literal `pw /V1/EDID.EdidStatus=...`, and `handleGet` wraps that unparsed into its text output. Callers wanting a bare value must strip the prefix themselves. Multi-line replies are no longer truncated: `GET /V1/MANAGEMENT/NETWORK.*` returns all nine lines the device sends, not just the first.
 

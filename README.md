@@ -22,7 +22,7 @@ One requirement worth repeating here: **the machine must be on the same network 
 npm install
 npm start          # run the server on stdio
 npm run dev        # same, with --watch
-npm test           # 56 tests, node:test, no test framework needed
+npm test           # 61 tests, node:test, no test framework needed
 npm run bundle     # build the distributable .mcpb
 ```
 
@@ -166,7 +166,7 @@ Every command times out after 5 seconds if its reply block never closes. `connec
 lw3-mcp/
 ├── src/
 │   ├── index.js                 # MCP server: tool registration and handlers
-│   ├── lw3-protocol.js          # framing, command queue, TCP->WSS fallback
+│   ├── lw3-protocol.js          # framing, signature-keyed pending-command map, TCP->WSS fallback
 │   ├── transports/
 │   │   ├── tcp.js               # raw TCP socket, port 6107
 │   │   └── wss.js               # secure WebSocket fallback, wss://<host>/lw3
