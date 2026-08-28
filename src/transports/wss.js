@@ -5,6 +5,20 @@ export const WSS_PATH = '/lw3';
 export const WSS_USER = 'admin';
 
 /**
+ * Some Lightware devices send a non-compliant WebSocket close code when they
+ * hang up, which ws reports as an 'error' (WS_ERR_INVALID_CLOSE_CODE) even
+ * though the disconnect itself is normal and successful. It's a complaint
+ * about the peer's close frame, raised while the connection is already
+ * ending — no caller action can address it, so forwarding it as a fatal
+ * 'error' just crashes a consumer with no error listener over what is
+ * otherwise an ordinary close. Exported so tests can exercise the decision
+ * directly instead of forcing a real socket to receive a bad close code.
+ */
+export function isSuppressedWsError(err) {
+  return err?.code === 'WS_ERR_INVALID_CLOSE_CODE';
+}
+
+/**
  * The device answered the upgrade with 401. Thrown so the caller can tell the
  * user to supply a password, rather than reporting a generic failure.
  */
@@ -70,6 +84,7 @@ export class WssTransport extends EventEmitter {
         // can catch it. Keep a no-op listener in place across teardown.
         ws.on('error', () => {});
         ws.terminate();
+        this.ws = null;
         reject(err);
       };
 
@@ -85,8 +100,17 @@ export class WssTransport extends EventEmitter {
         settled = true;
         ws.off('error', onConnectError);
         ws.on('message', (data) => this.emit('data', data.toString()));
-        ws.on('close', () => this.emit('close'));
-        ws.on('error', (err) => this.emit('error', err));
+        ws.on('close', () => {
+          // The socket is dead the moment 'close' fires — drop the
+          // reference so a later close() sees nothing to wait on instead
+          // of attaching a listener to an event that already happened.
+          this.ws = null;
+          this.emit('close');
+        });
+        ws.on('error', (err) => {
+          if (isSuppressedWsError(err)) return;
+          this.emit('error', err);
+        });
         resolve();
       });
     });
@@ -99,12 +123,21 @@ export class WssTransport extends EventEmitter {
 
   close() {
     return new Promise((resolve) => {
-      if (!this.ws) return resolve();
-      this.ws.once('close', () => {
+      const ws = this.ws;
+      // Nothing to wait on: never connected, already torn down by a failed
+      // connect / peer disconnect, or already closed. Waiting for a
+      // 'close' event here would hang forever, since it already fired (or
+      // never will).
+      if (!ws || ws.readyState === WebSocket.CLOSED) {
+        this.ws = null;
+        resolve();
+        return;
+      }
+      ws.once('close', () => {
         this.ws = null;
         resolve();
       });
-      this.ws.close();
+      ws.close();
     });
   }
 }

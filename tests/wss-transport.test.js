@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { WssTransport, AuthRequiredError, WSS_PATH, WSS_USER } from '../src/transports/wss.js';
+import {
+  WssTransport,
+  AuthRequiredError,
+  WSS_PATH,
+  WSS_USER,
+  isSuppressedWsError,
+} from '../src/transports/wss.js';
 
 // Answers any upgrade request with a bare 401, the way a Lightware device
 // does when the admin password is required. Listens on port 0 so tests never
@@ -62,6 +68,76 @@ test('connect() rejects (does not crash the process) when the device answers 401
   } finally {
     server.close();
   }
+});
+
+// Regression test for a hang reproduced against a real device: fail() called
+// ws.terminate() but never cleared this.ws. A caller that catches
+// AuthRequiredError and calls close() before deciding whether to retry then
+// found close() attaching a 'close' listener to a socket whose 'close' had
+// already fired — and calling .close() on it is a no-op once readyState is
+// CLOSED — so the promise never settled. This must fail against the
+// unfixed code.
+test('close() after a failed connect resolves', async () => {
+  const server = await listenWithAuthChallenge();
+  try {
+    const { port } = server.address();
+    const t = new WssTransport('127.0.0.1', undefined);
+    t.url = `ws://127.0.0.1:${port}/lw3`;
+
+    await t.connect().catch(() => {});
+
+    // Race close() against a short timer so a regression hangs the test
+    // instead of hanging the whole suite (and leaving this server's
+    // listening socket open forever).
+    const hang = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('close() hung')), 1000)
+    );
+    await Promise.race([t.close(), hang]);
+  } finally {
+    server.close();
+  }
+});
+
+test('close() is safe to call twice in a row', async () => {
+  const server = await listenWithAuthChallenge();
+  try {
+    const { port } = server.address();
+    const t = new WssTransport('127.0.0.1', undefined);
+    t.url = `ws://127.0.0.1:${port}/lw3`;
+
+    await t.connect().catch(() => {});
+
+    const hang = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('close() hung')), 1000)
+    );
+    await Promise.race([t.close(), hang]);
+    await Promise.race([t.close(), hang]);
+  } finally {
+    server.close();
+  }
+});
+
+// Regression test for a crash reproduced against a real device: on a
+// successful, ordinary disconnect the device sends a non-compliant close
+// code, which ws reports as an 'error' (WS_ERR_INVALID_CLOSE_CODE). The
+// post-open handler used to re-emit every 'error' verbatim, and an 'error'
+// event with no listener throws and kills the process — over what is
+// otherwise a normal close the caller can do nothing about. Tested directly
+// against the exported predicate rather than forcing a real socket to
+// receive a bad close code.
+test('isSuppressedWsError suppresses WS_ERR_INVALID_CLOSE_CODE', () => {
+  const badCloseCode = Object.assign(new RangeError('invalid status code 1006'), {
+    code: 'WS_ERR_INVALID_CLOSE_CODE',
+  });
+  assert.equal(isSuppressedWsError(badCloseCode), true);
+});
+
+test('isSuppressedWsError does not suppress other errors', () => {
+  assert.equal(isSuppressedWsError(new Error('boom')), false);
+  assert.equal(
+    isSuppressedWsError(Object.assign(new Error('reset'), { code: 'ECONNRESET' })),
+    false
+  );
 });
 
 test('targets the /lw3 endpoint as the admin user', () => {
