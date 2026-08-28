@@ -55,8 +55,15 @@ Measured on 2026-08-28 against a UCX-4x2-HC30 (`jimmy-hc30`, 192.168.2.104).
   cells is therefore a consequence of the current routing and changes as a result of the user's own
   clicks — routing `I5` away from every output frees `I1` again.
 
-  Note this is per-source contention, not per-cell: because the constraint is a shared chip input,
-  `I1` goes `Busy` on *all* destinations at once, which is what the two samples above show.
+  **The shape of that contention is not fully understood, and the panel must not assume it.** An
+  earlier draft of this spec inferred "shared chip input, therefore `Busy` on every destination at
+  once". Measurement contradicts that: with `I5` routed to *both* outputs, ten consecutive reads
+  over seven seconds returned `O1.I1=Busy` and `O2.I1=OK`, stably, every time.
+
+  So `SWITCHABLE` is stable per read but **not uniform across destinations**, and no rule relating
+  it to the current routing has been established. The panel therefore treats it as opaque: read it
+  per destination, honour whatever the device says, and never compute or predict it. This is the
+  reason the model keys switchability per destination rather than per source.
 
   Two consequences for the panel: `SWITCHABLE` must be re-read after **every** switch, not only on
   the poll timer, or the grid will show availability that the user just invalidated. And the panel
