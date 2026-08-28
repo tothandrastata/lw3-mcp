@@ -220,7 +220,7 @@ class LW3MCPServer {
         {
           name: 'xpoint',
           description:
-            'Show the video crosspoint: which source is routed to each destination, and which sources each destination can switch to.',
+            'Show the video crosspoint: which source is routed to each destination, and which sources each destination can switch to',
           inputSchema: {
             type: 'object',
             properties: {},
@@ -526,19 +526,38 @@ class LW3MCPServer {
 
     const videoLines = await this.lw3.sendCommand(`GETALL ${VIDEO_NODE}/*`);
 
-    // SWITCHABLE is a child node per destination, so it needs one call each.
+    // SWITCHABLE is a child node per destination, so it needs one call each. A
+    // timeout or a missing SWITCHABLE child on one destination must not cost the
+    // caller the routing and port names already read successfully, so each read
+    // is caught individually — buildGrid treats a destination with no switchable
+    // data as unread (not as a device refusal), and renderGridText reports that
+    // honestly rather than as a wall of failed cells.
     const destinations = [...new Set(
       xpLines.map((l) => l.match(/\/XP\/(O\d+)[./]/)?.[1]).filter(Boolean)
     )];
     const switchableLines = [];
+    const switchableErrors = [];
     for (const port of destinations) {
-      switchableLines.push(...(await this.lw3.sendCommand(`GETALL ${XP_NODE}/${port}/SWITCHABLE`)));
+      try {
+        switchableLines.push(...(await this.lw3.sendCommand(`GETALL ${XP_NODE}/${port}/SWITCHABLE`)));
+      } catch (error) {
+        console.error(`[xpoint] Could not read SWITCHABLE for ${port}:`, error.message);
+        switchableErrors.push(`${port}: ${error.message}`);
+      }
     }
 
     const grid = buildGrid({ xpLines, videoLines, switchableLines });
+    let text = renderGridText(grid);
+
+    if (switchableErrors.length) {
+      text +=
+        `\n\nCould not read switchability for ${switchableErrors.length} destination(s) ` +
+        '(reported above as "could not be read"):\n' +
+        switchableErrors.map((e) => `  ${e}`).join('\n');
+    }
 
     return {
-      content: [{ type: 'text', text: renderGridText(grid) }],
+      content: [{ type: 'text', text }],
     };
   }
 

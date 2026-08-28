@@ -168,3 +168,75 @@ test('an empty device yields an empty grid, not a crash', () => {
   assert.deepEqual(g.destinations, []);
   assert.deepEqual(g.sources, [{ port: '0', name: 'Disconnect', signalPresent: null }]);
 });
+
+test('a destination with no reported signal presence is not shown as "no signal"', () => {
+  // O2 never gets a /V1/MEDIA/VIDEO/O2.SignalPresent line in the fixture above -
+  // signalPresent stays null, meaning "never reported", not "reported false".
+  const g = grid();
+  assert.equal(g.destinations.find((d) => d.port === 'O2').signalPresent, null);
+
+  const text = renderGridText(g);
+  const o2Line = text.split('\n').find((l) => l.includes('HDMI out 2'));
+  assert.ok(o2Line, 'HDMI out 2 should be named in the routing section');
+  assert.doesNotMatch(o2Line, /no signal/, 'a signal that was never read must not be presented as a definite negative');
+  assert.match(o2Line, /not reported/i);
+});
+
+test('a destination with reported signal absence still says "no signal"', () => {
+  // O1 does get an explicit SignalPresent=false line - that is a real negative
+  // reading and must still say so, distinct from the "never asked" case above.
+  const text = renderGridText(grid());
+  const o1Line = text.split('\n').find((l) => l.includes('HDMI out 1'));
+  assert.match(o1Line, /no signal/);
+});
+
+test('the blocked list carries the device\'s own answers, like Busy', () => {
+  const text = renderGridText(grid());
+  const blockedSection = text.split('Not currently switchable:')[1] ?? '';
+  assert.match(blockedSection, /Busy/);
+});
+
+test('a destination whose switchability could not be read at all is summarised once, not as "Unavailable" per source', () => {
+  const g = buildGrid({
+    xpLines: [
+      'pw /V1/MEDIA/VIDEO/XP/O1.Lock=false',
+      'pw /V1/MEDIA/VIDEO/XP/O1.ConnectedSource=I2',
+    ],
+    videoLines: [
+      'pw /V1/MEDIA/VIDEO/I1.Name=Source One',
+      'pw /V1/MEDIA/VIDEO/I2.Name=Source Two',
+      'pw /V1/MEDIA/VIDEO/O1.Name=Output One',
+    ],
+    // Simulates a failed/absent SWITCHABLE read for O1: no entries at all.
+    switchableLines: [],
+  });
+
+  const text = renderGridText(g);
+  assert.doesNotMatch(text, /Unavailable/,
+    'unread switchability must never be presented as the device\'s own answer');
+  assert.match(text, /could not be read/i);
+  assert.match(text, /Output One/, 'the destination is named in the unread summary');
+
+  const blockedSection = text.split('Not currently switchable:')[1];
+  assert.equal(blockedSection, undefined,
+    'a destination with no data at all has nothing to put in the device-answers list');
+});
+
+test('a locked destination is reported once in the blocked list, not once per source', () => {
+  const locked = xpLines.map((l) => l.replace('O2.Lock=false', 'O2.Lock=true'));
+  const g = buildGrid({ xpLines: locked, videoLines, switchableLines });
+  const text = renderGridText(g);
+
+  const blockedSection = text.split('Not currently switchable:')[1] ?? '';
+  const o2BlockedLines = blockedSection.split('\n').filter((l) => l.includes('HDMI out 2'));
+  assert.equal(o2BlockedLines.length, 1, 'a locked destination should not repeat once per source');
+  assert.match(o2BlockedLines[0], /locked/i);
+});
+
+test('the text names a source each destination can switch to', () => {
+  const text = renderGridText(grid());
+  assert.match(text, /Can switch to:/);
+  // O2 allows I1 even though O1 does not - the positive list reflects that
+  // non-uniformity directly, which is the whole point of showing it.
+  assert.match(text, /HDMI out 2 can switch to:.*USB-C in 1/);
+});

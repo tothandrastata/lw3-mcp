@@ -110,24 +110,57 @@ export function renderGridText(grid) {
   const lines = grid.destinations.map((d) => {
     const source = grid.sources.find((s) => s.port === d.connectedSource);
     const from = d.connectedSource ? `${source?.name || d.connectedSource}` : 'nothing';
-    const flags = [d.locked ? 'locked' : null, d.signalPresent ? 'signal' : 'no signal']
-      .filter(Boolean)
-      .join(', ');
+    // signalPresent is `null` when the device never reported it, deliberately kept
+    // distinct in buildGrid from `false` (device explicitly said no signal). Folding
+    // both into "no signal" would tell the reader a definite negative about a line
+    // that was simply never read.
+    const signal =
+      d.signalPresent === true ? 'signal' : d.signalPresent === false ? 'no signal' : 'signal not reported';
+    const flags = [d.locked ? 'locked' : null, signal].filter(Boolean).join(', ');
     return `  ${d.name} <- ${from}  (${flags})`;
   });
 
-  const blocked = grid.destinations.flatMap((d) =>
-    grid.sources
-      .filter((s) => {
-        const c = cellState(grid, d.port, s.port);
-        return !c.enabled && !c.selected;
-      })
-      .map((s) => `  ${s.name} -> ${d.name}: ${cellState(grid, d.port, s.port).reason}`)
-  );
+  const canSwitch = [];
+  const blocked = [];
+  const unread = [];
 
-  return [
-    'Current routing:',
-    ...lines,
-    ...(blocked.length ? ['', 'Not currently switchable:', ...blocked] : []),
-  ].join('\n');
+  for (const d of grid.destinations) {
+    if (d.locked) {
+      // Every cell of a locked destination carries the same reason; say it once
+      // instead of once per source.
+      blocked.push(`  ${d.name}: locked`);
+      continue;
+    }
+
+    // Compute each cell's state exactly once and reuse it for both lists below.
+    const cells = grid.sources.map((s) => ({ source: s, state: cellState(grid, d.port, s.port) }));
+
+    const available = cells
+      .filter(({ state }) => state.enabled && !state.selected)
+      .map(({ source }) => source.name);
+    if (available.length) {
+      canSwitch.push(`  ${d.name} can switch to: ${available.join(', ')}`);
+    }
+
+    // 'Unavailable' means the device was never asked, or never answered - not that
+    // it refused. That is a different fact from a device answer like 'Busy', so it
+    // is kept out of the device-answers list and reported once per destination
+    // instead of once per source, in a separate summary line below.
+    if (cells.some(({ state }) => !state.enabled && !state.selected && state.reason === 'Unavailable')) {
+      unread.push(d.name);
+    }
+
+    for (const { source, state } of cells) {
+      if (state.enabled || state.selected || state.reason === 'Unavailable') continue;
+      blocked.push(`  ${d.name} <- ${source.name}: ${state.reason}`);
+    }
+  }
+
+  const sections = ['Current routing:', ...lines];
+
+  if (canSwitch.length) sections.push('', 'Can switch to:', ...canSwitch);
+  if (blocked.length) sections.push('', 'Not currently switchable:', ...blocked);
+  if (unread.length) sections.push('', `Switchability could not be read for: ${unread.join(', ')}`);
+
+  return sections.join('\n');
 }
