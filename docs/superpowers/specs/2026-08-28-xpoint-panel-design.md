@@ -51,33 +51,31 @@ Measured on 2026-08-28 against a UCX-4x2-HC30 (`jimmy-hc30`, 192.168.2.104).
 - `/V1/MEDIA/VIDEO/XP/<out>/SWITCHABLE` publishes per-source switchability, read-only. It is
   **neither uniform nor static**. Two samples taken minutes apart, with the routing unchanged in
   between only in the sense that both outputs sat on `I5`:
+  Ten consecutive reads over seven seconds, with `I5` routed to **both** outputs throughout,
+  returned the same thing every time:
+
   ```
-  first sample   O1:  0=OK  I1=OK    I2=OK  I3=OK  I4=OK  I5=OK
-                 O2:  0=OK  I1=Busy  I2=OK  I3=OK  I4=OK  I5=OK
-
-  later sample   O1:  0=OK  I1=Busy  I2=OK  I3=OK  I4=OK  I5=OK
-                 O2:  0=OK  I1=Busy  I2=OK  I3=OK  I4=OK  I5=OK
+  O1:  0=OK  I1=Busy  I2=OK  I3=OK  I4=OK  I5=OK
+  O2:  0=OK  I1=OK    I2=OK  I3=OK  I4=OK  I5=OK
   ```
-  `Busy` reflects the device's **internal wiring**: `I1` and the Welcome Screen (`I5`) are connected
-  to the *same input of the internal crosspoint chip*. Only one of them can be in use at a time, so
-  while `I5` is routed to any output, `I1` reads `Busy` on every destination. The set of disabled
-  cells is therefore a consequence of the current routing and changes as a result of the user's own
-  clicks — routing `I5` away from every output frees `I1` again.
 
-  **The shape of that contention is not fully understood, and the panel must not assume it.** An
-  earlier draft of this spec inferred "shared chip input, therefore `Busy` on every destination at
-  once". Measurement contradicts that: with `I5` routed to *both* outputs, ten consecutive reads
-  over seven seconds returned `O1.I1=Busy` and `O2.I1=OK`, stably, every time.
+  The cause of `Busy` is the device's **internal wiring**: `I1` and the Welcome Screen (`I5`) are
+  connected to the *same input of the internal crosspoint chip*, so only one of them can be in use
+  at a time.
 
-  So `SWITCHABLE` is stable per read but **not uniform across destinations**, and no rule relating
-  it to the current routing has been established. The panel therefore treats it as opaque: read it
-  per destination, honour whatever the device says, and never compute or predict it. This is the
-  reason the model keys switchability per destination rather than per source.
+  **But the shape of that contention is not understood, and nothing here may assume it.** An earlier
+  draft of this spec reasoned from the shared chip input to "therefore `Busy` on every destination at
+  once". The measurement above disproves it: identical routing, yet `I1` is `Busy` on `O1` and `OK`
+  on `O2`, stably. Why the two destinations differ is unknown.
 
-  Two consequences for the panel: `SWITCHABLE` must be re-read after **every** switch, not only on
-  the poll timer, or the grid will show availability that the user just invalidated. And the panel
-  must display the device's own word (`Busy`) without inventing an explanation — the underlying
-  resource model is internal to the device and not something this project represents.
+  So `SWITCHABLE` is stable per read but **not uniform across destinations**, and no rule relating it
+  to the current routing has been established. It is therefore treated as opaque: read per
+  destination, honoured as given, never computed, cached, aggregated or predicted. That is why the
+  model keys switchability per destination rather than per source, and why the text rendering shows
+  the device's own word (`Busy`) rather than an explanation this project cannot justify.
+
+  One consequence for a future panel: because availability may change when routing changes,
+  `SWITCHABLE` must be re-read after **every** switch, not only on a poll timer.
 - `0` is a legitimate source meaning disconnect. `MAN …:switch` states: *"Use `0` character as
   `<in>` to disconnect destination."*
 - Ports carry writable human names: `I1`="USB-C in 1", `I5`="Welcome Screen", `O1`="HDMI out 1".
