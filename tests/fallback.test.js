@@ -86,7 +86,7 @@ test('sends commands through whichever transport connected', async () => {
   const { lw3 } = build({ tcp: new FakeTransport(new Error('refused')), wss });
   await lw3.connect('device.local');
   lw3.sendCommand('GET /V1/X.Y').catch(() => {}); // no reply arrives; we only assert the write
-  assert.deepEqual(wss.sent, ['GET /V1/X.Y\n']);
+  assert.match(wss.sent[0], /^[0-9A-F]{4}#GET \/V1\/X\.Y\n$/, 'commands are signed before being sent');
 });
 
 test('splits CRLF-terminated lines, the framing the WSS transport delivers', async () => {

@@ -2,6 +2,50 @@ import { EventEmitter } from 'node:events';
 import { TcpTransport } from './transports/tcp.js';
 import { WssTransport, AuthRequiredError } from './transports/wss.js';
 
+/** How long to wait for a reply block to close before giving up. */
+export const COMMAND_TIMEOUT_MS = 5000;
+
+/** Any device error carries this marker, whatever its prefix: pE, mE, -E. */
+const DEVICE_ERROR = /%E\d+:/;
+
+/**
+ * Turn the lines of a GETALL reply into structured form.
+ * Lifted verbatim out of getAll's timer callback; the parsing itself is unchanged.
+ */
+export function parseGetAll(lines) {
+  const result = { properties: [], nodes: [], methods: [] };
+
+  lines.forEach((line) => {
+    if (line.startsWith('pr ') || line.startsWith('pw ')) {
+      const writable = line.startsWith('pw ');
+      const match = line.match(/^p[rw] (.+?)\.([^=]+)=(.*)$/);
+      if (match) {
+        result.properties.push({
+          nodepath: match[1],
+          property: match[2],
+          value: match[3],
+          writable: writable,
+        });
+      }
+    } else if (line.startsWith('n- ')) {
+      result.nodes.push(line.substring(3));
+    } else if (line.startsWith('m- ')) {
+      const methodPath = line.substring(3);
+      const colonIndex = methodPath.lastIndexOf(':');
+      if (colonIndex !== -1) {
+        result.methods.push({
+          nodepath: methodPath.substring(0, colonIndex),
+          method: methodPath.substring(colonIndex + 1),
+        });
+      } else {
+        result.methods.push({ nodepath: methodPath, method: '' });
+      }
+    }
+  });
+
+  return result;
+}
+
 /**
  * LW3 Protocol Handler
  * Handles communication with Lightware devices using the LW3 protocol
@@ -20,8 +64,11 @@ export class LW3Protocol extends EventEmitter {
     this.host = null;
     this.port = null;
     this.buffer = '';
+    // Keyed by signature. Each entry: { signature, resolve, reject, lines, timer }
     this.pendingCommands = new Map();
     this.commandId = 0;
+    // Signature of the reply block currently being received, or null between blocks.
+    this.currentBlock = null;
   }
 
   /**
@@ -113,55 +160,62 @@ export class LW3Protocol extends EventEmitter {
     }
   }
 
-  /**
-   * Process a response line from the device
-   * @param {string} line
-   */
-  processResponse(line) {
-    // LW3 responses typically follow patterns like:
-    // pr <property>=<value>  (read-only property)
-    // pw <property>=<value>  (read-write property)
-    // m- <method>  (method indicator)
-    // mO <method>  (method execution success)
-    // mE <method> %E###: error message  (method error)
-    // n- <path>  (node/sub-path indicator)
-    // pE <property> %E###: error message  (property error)
-    // er<error_code>  (general error)
-
-    this.emit('response', line);
-
-    // Resolve pending command if exists
-    const firstPending = this.pendingCommands.values().next().value;
-    if (firstPending) {
-      // For multi-line responses (like GETALL), collect lines
-      if (firstPending.collectMultiple) {
-        if (line.startsWith('pr ') || line.startsWith('pw ') ||
-            line.startsWith('n- ') || line.startsWith('m- ')) {
-          // Collect property lines, node lines, and method lines
-          firstPending.responses.push(line);
-        } else if (line.startsWith('pE ') || line.startsWith('mE ') || line.startsWith('er')) {
-          // Error response ends collection
-          this.pendingCommands.delete(firstPending.id);
-          firstPending.reject(new Error(`Device error: ${line}`));
-        }
-        // Otherwise ignore other lines and wait for timeout to resolve
-      } else {
-        // Single-line response
-        this.pendingCommands.delete(firstPending.id);
-
-        if (line.startsWith('pE ') || line.startsWith('mE ') || line.startsWith('er')) {
-          firstPending.reject(new Error(`Device error: ${line}`));
-        } else {
-          firstPending.resolve(line);
-        }
-      }
-    }
+  /** Next 4-hex-digit command signature, wrapping at 0xFFFF. */
+  nextSignature() {
+    const signature = this.commandId.toString(16).padStart(4, '0').toUpperCase();
+    this.commandId = (this.commandId + 1) & 0xffff;
+    return signature;
   }
 
   /**
-   * Send a command to the device
+   * Route one line from the device.
+   *
+   * The device brackets each reply as `{XXXX` … `}`, where XXXX is the signature
+   * of the command that caused it. A line outside any block is therefore not a
+   * reply to anything — it is subscription traffic or a banner — and must never
+   * be attributed to a pending command.
+   */
+  processResponse(line) {
+    this.emit('response', line);
+
+    if (/^\{[0-9A-Fa-f]{4}$/.test(line)) {
+      this.currentBlock = line.slice(1).toUpperCase();
+      const pending = this.pendingCommands.get(this.currentBlock);
+      if (pending) pending.lines = [];
+      return;
+    }
+
+    if (line === '}') {
+      const signature = this.currentBlock;
+      this.currentBlock = null;
+      if (!signature) return;
+
+      const pending = this.pendingCommands.get(signature);
+      if (!pending) return; // already timed out; its lines were emitted as unsolicited
+
+      this.pendingCommands.delete(signature);
+      clearTimeout(pending.timer);
+
+      const failure = pending.lines.find((l) => DEVICE_ERROR.test(l));
+      if (failure) pending.reject(new Error(`Device error: ${failure}`));
+      else pending.resolve(pending.lines);
+      return;
+    }
+
+    if (this.currentBlock === null) {
+      this.emit('unsolicited', line);
+      return;
+    }
+
+    const pending = this.pendingCommands.get(this.currentBlock);
+    if (pending) pending.lines.push(line);
+    else this.emit('unsolicited', line);
+  }
+
+  /**
+   * Send one command and resolve with the lines of its reply block.
    * @param {string} command
-   * @returns {Promise<string>}
+   * @returns {Promise<string[]>}
    */
   sendCommand(command) {
     return new Promise((resolve, reject) => {
@@ -170,149 +224,48 @@ export class LW3Protocol extends EventEmitter {
         return;
       }
 
-      const id = this.commandId++;
-      this.pendingCommands.set(id, { id, resolve, reject });
+      const signature = this.nextSignature();
 
-      const cmd = command.endsWith('\n') ? command : command + '\n';
+      const timer = setTimeout(() => {
+        if (this.pendingCommands.has(signature)) {
+          this.pendingCommands.delete(signature);
+          reject(new Error(`Command timeout: ${command}`));
+        }
+      }, COMMAND_TIMEOUT_MS);
+
+      this.pendingCommands.set(signature, { signature, resolve, reject, lines: [], timer });
 
       try {
-        this.transport.send(cmd);
+        this.transport.send(`${signature}#${command}\n`);
       } catch (error) {
-        this.pendingCommands.delete(id);
+        clearTimeout(timer);
+        this.pendingCommands.delete(signature);
         reject(error);
-        return;
       }
-
-      // Timeout after 5 seconds
-      setTimeout(() => {
-        if (this.pendingCommands.has(id)) {
-          this.pendingCommands.delete(id);
-          reject(new Error('Command timeout'));
-        }
-      }, 5000);
     });
   }
 
-  /**
-   * GET command - Read a property value
-   * @param {string} property - Property path (e.g., "MEDIA.XP.VIDEO:1.SOURCE")
-   * @returns {Promise<string>}
-   */
   async get(property) {
-    const response = await this.sendCommand(`GET ${property}`);
-    // Return raw response from device
-    return response;
+    return (await this.sendCommand(`GET ${property}`)).join('\n');
   }
 
-  /**
-   * SET command - Set a property value
-   * @param {string} property - Property path
-   * @param {string} value - Value to set
-   * @returns {Promise<string>}
-   */
   async set(property, value) {
-    const response = await this.sendCommand(`SET ${property}=${value}`);
-    return response;
+    return (await this.sendCommand(`SET ${property}=${value}`)).join('\n');
   }
 
   /**
-   * GETALL command - Get all properties and nodes
-   * @param {string} [path] - Optional property path to filter
-   * @returns {Promise<{properties: Array, nodes: Array}>}
+   * GETALL - a node's children, its own properties, and its methods.
+   * @param {string} [path]
+   * @returns {Promise<{properties: Array, nodes: Array, methods: Array}>}
    */
   async getAll(path = '') {
     const command = path ? `GETALL ${path}` : 'GETALL';
-
-    return new Promise((resolve, reject) => {
-      if (!this.connected || !this.transport) {
-        reject(new Error('Not connected to a device'));
-        return;
-      }
-
-      const id = this.commandId++;
-      this.pendingCommands.set(id, {
-        id,
-        resolve,
-        reject,
-        collectMultiple: true,
-        responses: [],
-      });
-
-      const cmd = command.endsWith('\n') ? command : command + '\n';
-
-      try {
-        this.transport.send(cmd);
-      } catch (error) {
-        this.pendingCommands.delete(id);
-        reject(error);
-        return;
-      }
-
-      // GETALL: Wait 1 second to collect all responses, then parse and resolve
-      setTimeout(() => {
-        if (this.pendingCommands.has(id)) {
-          const pending = this.pendingCommands.get(id);
-          this.pendingCommands.delete(id);
-
-          // Parse responses into structured format
-          const result = {
-            properties: [],
-            nodes: [],
-            methods: []
-          };
-
-          pending.responses.forEach(line => {
-            if (line.startsWith('pr ') || line.startsWith('pw ')) {
-              // Property: pr /nodepath.property=value or pw /nodepath.property=value
-              const writable = line.startsWith('pw ');
-              const match = line.match(/^p[rw] (.+?)\.([^=]+)=(.*)$/);
-              if (match) {
-                result.properties.push({
-                  nodepath: match[1],
-                  property: match[2],
-                  value: match[3],
-                  writable: writable
-                });
-              }
-            } else if (line.startsWith('n- ')) {
-              // Node: n- /path/node
-              const nodePath = line.substring(3);
-              result.nodes.push(nodePath);
-            } else if (line.startsWith('m- ')) {
-              // Method: m- /nodepath:method
-              const methodPath = line.substring(3);
-              const colonIndex = methodPath.lastIndexOf(':');
-              if (colonIndex !== -1) {
-                result.methods.push({
-                  nodepath: methodPath.substring(0, colonIndex),
-                  method: methodPath.substring(colonIndex + 1)
-                });
-              } else {
-                // Fallback if no colon found
-                result.methods.push({
-                  nodepath: methodPath,
-                  method: ''
-                });
-              }
-            }
-          });
-
-          resolve(result);
-        }
-      }, 1000);
-    });
+    return parseGetAll(await this.sendCommand(command));
   }
 
-  /**
-   * CALL command - Execute a method
-   * @param {string} method - Method path
-   * @param {string[]} [params] - Optional parameters
-   * @returns {Promise<string>}
-   */
   async call(method, params = []) {
     const paramsStr = params.length > 0 ? ` ${params.join(' ')}` : '';
-    const response = await this.sendCommand(`CALL ${method}${paramsStr}`);
-    return response;
+    return (await this.sendCommand(`CALL ${method}${paramsStr}`)).join('\n');
   }
 
   /**
@@ -331,8 +284,7 @@ export class LW3Protocol extends EventEmitter {
    * @returns {Promise<string>}
    */
   async man(path) {
-    const response = await this.sendCommand(`MAN ${path}`);
-    return response;
+    return (await this.sendCommand(`MAN ${path}`)).join('\n');
   }
 
   /**
