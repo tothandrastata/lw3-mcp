@@ -28,28 +28,53 @@ export class TcpTransport extends EventEmitter {
         if (settled) return;
         settled = true;
         socket.destroy();
+        this.socket = null;
         reject(new Error(`TCP ${this.host}:${this.port} timed out after ${this.timeoutMs}ms`));
       }, this.timeoutMs);
+
+      // Rejects the connect() promise. Only wired up for the duration of the
+      // connect attempt — removed once 'connect' fires so a post-connect
+      // error doesn't run this dead branch on top of the real error handler.
+      const onConnectError = (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        socket.destroy();
+        this.socket = null;
+        reject(new Error(`TCP ${this.host}:${this.port} — ${err.message}`));
+      };
 
       socket.once('connect', () => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        socket.off('error', onConnectError);
         socket.on('data', (d) => this.emit('data', d.toString()));
-        socket.on('close', () => this.emit('close'));
+        socket.on('close', () => {
+          // The socket is dead the moment 'close' fires — drop the
+          // reference so a later close() sees nothing to wait on instead
+          // of attaching a listener to an event that already happened.
+          this.socket = null;
+          this.emit('close');
+        });
         socket.on('error', (err) => this.emit('error', err));
         resolve();
       });
 
-      socket.once('error', (err) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        socket.destroy();
-        reject(new Error(`TCP ${this.host}:${this.port} — ${err.message}`));
-      });
+      socket.once('error', onConnectError);
 
-      socket.connect(this.port, this.host);
+      try {
+        socket.connect(this.port, this.host);
+      } catch (err) {
+        // A synchronous throw (e.g. an invalid port) never reaches the
+        // timeout or the 'error' handler above, so clean up here.
+        clearTimeout(timer);
+        if (!settled) {
+          settled = true;
+          this.socket = null;
+          reject(err);
+        }
+      }
     });
   }
 
@@ -60,12 +85,21 @@ export class TcpTransport extends EventEmitter {
 
   close() {
     return new Promise((resolve) => {
-      if (!this.socket) return resolve();
-      this.socket.once('close', () => {
+      const socket = this.socket;
+      // Nothing to wait on: never connected, already torn down by a failed
+      // connect / peer disconnect, or already destroyed. Waiting for a
+      // 'close' event here would hang forever, since it already fired (or
+      // never will).
+      if (!socket || socket.destroyed) {
+        this.socket = null;
+        resolve();
+        return;
+      }
+      socket.once('close', () => {
         this.socket = null;
         resolve();
       });
-      this.socket.end();
+      socket.end();
     });
   }
 }
