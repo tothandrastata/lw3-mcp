@@ -8,6 +8,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { LW3Protocol } from './lw3-protocol.js';
 import { LightwareDiscovery } from './lightware-discovery.js';
+import { buildGrid, renderGridText, XP_NODE, VIDEO_NODE } from './xpoint.js';
 
 /**
  * MCP Server for Lightware LW3 Protocol Gateway
@@ -216,6 +217,15 @@ class LW3MCPServer {
             },
           },
         },
+        {
+          name: 'xpoint',
+          description:
+            'Show the video crosspoint: which source is routed to each destination, and which sources each destination can switch to.',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+          },
+        },
       ],
     }));
 
@@ -254,6 +264,9 @@ class LW3MCPServer {
 
           case 'discover':
             return await this.handleDiscover(args);
+
+          case 'xpoint':
+            return await this.handleXpoint();
 
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -496,6 +509,37 @@ class LW3MCPServer {
     } finally {
       discovery.stopDiscovery();
     }
+  }
+
+  async handleXpoint() {
+    this.ensureConnected();
+
+    let xpLines;
+    try {
+      xpLines = await this.lw3.sendCommand(`GETALL ${XP_NODE}/*`);
+    } catch (error) {
+      throw new Error(
+        `Could not read the video crosspoint at ${XP_NODE} — ${error.message}. ` +
+          'This device may not have a video crosspoint, or may use a different node layout.'
+      );
+    }
+
+    const videoLines = await this.lw3.sendCommand(`GETALL ${VIDEO_NODE}/*`);
+
+    // SWITCHABLE is a child node per destination, so it needs one call each.
+    const destinations = [...new Set(
+      xpLines.map((l) => l.match(/\/XP\/(O\d+)[./]/)?.[1]).filter(Boolean)
+    )];
+    const switchableLines = [];
+    for (const port of destinations) {
+      switchableLines.push(...(await this.lw3.sendCommand(`GETALL ${XP_NODE}/${port}/SWITCHABLE`)));
+    }
+
+    const grid = buildGrid({ xpLines, videoLines, switchableLines });
+
+    return {
+      content: [{ type: 'text', text: renderGridText(grid) }],
+    };
   }
 
   ensureConnected() {

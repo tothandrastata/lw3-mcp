@@ -67,7 +67,8 @@
     {
       "name": "MAN",
       "description": "Get manual/documentation for a property or method"
-    }
+    },
+    { "name": "xpoint", "description": "Show the video crosspoint: which source is routed to each destination, and which sources each destination can switch to." }
   ],
   "compatibility": {
     "platforms": [
