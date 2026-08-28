@@ -354,7 +354,145 @@ Create `tests/wss-transport.test.js`:
 ```js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { WssTransport, AuthRequiredError, WSS_PATH, WSS_USER } from '../src/transports/wss.js';
+import http from 'node:http';
+import {
+  WssTransport,
+  AuthRequiredError,
+  WSS_PATH,
+  WSS_USER,
+  isSuppressedWsError,
+} from '../src/transports/wss.js';
+
+// Answers any upgrade request with a bare 401, the way a Lightware device
+// does when the admin password is required. Listens on port 0 so tests never
+// collide, and never touches a real device or the network.
+const listenWithAuthChallenge = () =>
+  new Promise((resolve) => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="test"' });
+      res.end();
+    });
+    server.listen(0, '127.0.0.1', () => resolve(server));
+  });
+
+// Regression test for a crash reproduced against a real device: connect()'s
+// fail() helper used to call ws.removeAllListeners() and then ws.terminate(),
+// which strips the 'error' listener before terminate() asynchronously emits
+// one. An unhandled 'error' event on an EventEmitter throws, which — with
+// nothing left to catch it — took down the whole Node process instead of
+// merely rejecting connect()'s promise. 401 is the primary path for a
+// password-protected device, so this was a crash on the feature's main flow.
+test('connect() rejects (does not crash the process) when the device answers 401 with no password', async () => {
+  const server = await listenWithAuthChallenge();
+  try {
+    const { port } = server.address();
+    const t = new WssTransport('127.0.0.1', undefined);
+    t.url = `ws://127.0.0.1:${port}/lw3`;
+
+    await assert.rejects(() => t.connect(), (err) => {
+      assert.equal(err.name, 'AuthRequiredError');
+      assert.equal(err.passwordWasSupplied, false);
+      return true;
+    });
+
+    // If fail() left ws without an 'error' listener, terminate()'s async
+    // 'error' event throws here (or shortly after), crashing the whole test
+    // process before this timer ever fires. Reaching this line at all is
+    // the proof the process survived.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } finally {
+    server.close();
+  }
+});
+
+test('connect() rejects (does not crash the process) when the device answers 401 with a password supplied', async () => {
+  const server = await listenWithAuthChallenge();
+  try {
+    const { port } = server.address();
+    const t = new WssTransport('127.0.0.1', 'hunter2');
+    t.url = `ws://127.0.0.1:${port}/lw3`;
+
+    await assert.rejects(() => t.connect(), (err) => {
+      assert.equal(err.name, 'AuthRequiredError');
+      assert.equal(err.passwordWasSupplied, true);
+      return true;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } finally {
+    server.close();
+  }
+});
+
+// Regression test for a hang reproduced against a real device: fail() called
+// ws.terminate() but never cleared this.ws. A caller that catches
+// AuthRequiredError and calls close() before deciding whether to retry then
+// found close() attaching a 'close' listener to a socket whose 'close' had
+// already fired — and calling .close() on it is a no-op once readyState is
+// CLOSED — so the promise never settled. This must fail against the
+// unfixed code.
+test('close() after a failed connect resolves', async () => {
+  const server = await listenWithAuthChallenge();
+  try {
+    const { port } = server.address();
+    const t = new WssTransport('127.0.0.1', undefined);
+    t.url = `ws://127.0.0.1:${port}/lw3`;
+
+    await t.connect().catch(() => {});
+
+    // Race close() against a short timer so a regression hangs the test
+    // instead of hanging the whole suite (and leaving this server's
+    // listening socket open forever).
+    const hang = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('close() hung')), 1000)
+    );
+    await Promise.race([t.close(), hang]);
+  } finally {
+    server.close();
+  }
+});
+
+test('close() is safe to call twice in a row', async () => {
+  const server = await listenWithAuthChallenge();
+  try {
+    const { port } = server.address();
+    const t = new WssTransport('127.0.0.1', undefined);
+    t.url = `ws://127.0.0.1:${port}/lw3`;
+
+    await t.connect().catch(() => {});
+
+    const hang = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('close() hung')), 1000)
+    );
+    await Promise.race([t.close(), hang]);
+    await Promise.race([t.close(), hang]);
+  } finally {
+    server.close();
+  }
+});
+
+// Regression test for a crash reproduced against a real device: on a
+// successful, ordinary disconnect the device sends a non-compliant close
+// code, which ws reports as an 'error' (WS_ERR_INVALID_CLOSE_CODE). The
+// post-open handler used to re-emit every 'error' verbatim, and an 'error'
+// event with no listener throws and kills the process — over what is
+// otherwise a normal close the caller can do nothing about. Tested directly
+// against the exported predicate rather than forcing a real socket to
+// receive a bad close code.
+test('isSuppressedWsError suppresses WS_ERR_INVALID_CLOSE_CODE', () => {
+  const badCloseCode = Object.assign(new RangeError('invalid status code 1006'), {
+    code: 'WS_ERR_INVALID_CLOSE_CODE',
+  });
+  assert.equal(isSuppressedWsError(badCloseCode), true);
+});
+
+test('isSuppressedWsError does not suppress other errors', () => {
+  assert.equal(isSuppressedWsError(new Error('boom')), false);
+  assert.equal(
+    isSuppressedWsError(Object.assign(new Error('reset'), { code: 'ECONNRESET' })),
+    false
+  );
+});
 
 test('targets the /lw3 endpoint as the admin user', () => {
   assert.equal(WSS_PATH, '/lw3');
@@ -419,6 +557,20 @@ export const WSS_PATH = '/lw3';
 export const WSS_USER = 'admin';
 
 /**
+ * Some Lightware devices send a non-compliant WebSocket close code when they
+ * hang up, which ws reports as an 'error' (WS_ERR_INVALID_CLOSE_CODE) even
+ * though the disconnect itself is normal and successful. It's a complaint
+ * about the peer's close frame, raised while the connection is already
+ * ending — no caller action can address it, so forwarding it as a fatal
+ * 'error' just crashes a consumer with no error listener over what is
+ * otherwise an ordinary close. Exported so tests can exercise the decision
+ * directly instead of forcing a real socket to receive a bad close code.
+ */
+export function isSuppressedWsError(err) {
+  return err?.code === 'WS_ERR_INVALID_CLOSE_CODE';
+}
+
+/**
  * The device answered the upgrade with 401. Thrown so the caller can tell the
  * user to supply a password, rather than reporting a generic failure.
  */
@@ -468,11 +620,23 @@ export class WssTransport extends EventEmitter {
       this.ws = ws;
       let settled = false;
 
+      // Rejects the connect() promise. Only wired up for the duration of the
+      // connect attempt — removed once 'open' fires so a post-connect error
+      // doesn't run this dead branch on top of the real error handler.
+      const onConnectError = (err) => fail(new Error(`${this.url} — ${err.message}`));
+
       const fail = (err) => {
         if (settled) return;
         settled = true;
         ws.removeAllListeners();
+        // terminate() emits 'error' asynchronously even when the socket
+        // never finished connecting. Without a listener attached, that
+        // 'error' event is unhandled and Node throws, crashing the whole
+        // process — after the promise has already rejected, so nothing here
+        // can catch it. Keep a no-op listener in place across teardown.
+        ws.on('error', () => {});
         ws.terminate();
+        this.ws = null;
         reject(err);
       };
 
@@ -481,14 +645,24 @@ export class WssTransport extends EventEmitter {
         else fail(new Error(`${this.url} — HTTP ${res.statusCode}`));
       });
 
-      ws.on('error', (err) => fail(new Error(`${this.url} — ${err.message}`)));
+      ws.on('error', onConnectError);
 
       ws.on('open', () => {
         if (settled) return;
         settled = true;
+        ws.off('error', onConnectError);
         ws.on('message', (data) => this.emit('data', data.toString()));
-        ws.on('close', () => this.emit('close'));
-        ws.on('error', (err) => this.emit('error', err));
+        ws.on('close', () => {
+          // The socket is dead the moment 'close' fires — drop the
+          // reference so a later close() sees nothing to wait on instead
+          // of attaching a listener to an event that already happened.
+          this.ws = null;
+          this.emit('close');
+        });
+        ws.on('error', (err) => {
+          if (isSuppressedWsError(err)) return;
+          this.emit('error', err);
+        });
         resolve();
       });
     });
@@ -501,12 +675,21 @@ export class WssTransport extends EventEmitter {
 
   close() {
     return new Promise((resolve) => {
-      if (!this.ws) return resolve();
-      this.ws.once('close', () => {
+      const ws = this.ws;
+      // Nothing to wait on: never connected, already torn down by a failed
+      // connect / peer disconnect, or already closed. Waiting for a
+      // 'close' event here would hang forever, since it already fired (or
+      // never will).
+      if (!ws || ws.readyState === WebSocket.CLOSED) {
+        this.ws = null;
+        resolve();
+        return;
+      }
+      ws.once('close', () => {
         this.ws = null;
         resolve();
       });
-      this.ws.close();
+      ws.close();
     });
   }
 }
@@ -516,7 +699,7 @@ export class WssTransport extends EventEmitter {
 
 Run: `npm test`
 
-Expected: PASS, 24 tests, 0 failures.
+Expected: PASS, 30 tests, 0 failures.
 
 - [ ] **Step 6: Commit**
 
@@ -882,7 +1065,7 @@ Replace `getConnectionInfo`:
 
 Run: `npm test`
 
-Expected: PASS, 32 tests, 0 failures.
+Expected: PASS, 38 tests, 0 failures.
 
 - [ ] **Step 5: Check nothing still references the old socket field**
 
@@ -951,7 +1134,7 @@ Replace `handleConnect` in `src/index.js` with:
 - [ ] **Step 3: Verify the server still starts and lists 11 tools**
 
 Run: `npm test`
-Expected: PASS, 32 tests, 0 failures — the manifest drift tests confirm the tool list is unchanged.
+Expected: PASS, 38 tests, 0 failures — the manifest drift tests confirm the tool list is unchanged.
 
 Run: `node scripts/verify-bundle.js dist/lw3-mcp-1.0.0.mcpb`
 Expected: `OK: bundle unpacks, dependencies present, server lists 11 tools`. This runs the *previously built* bundle, so it is only a sanity check that nothing in the working tree broke the old artifact; Task 5 rebuilds.
@@ -1054,7 +1237,7 @@ Then call it inside `verifyBundle`, immediately after the existing `assertRequir
 
 Run: `npm test`
 
-Expected: PASS, 35 tests, 0 failures.
+Expected: PASS, 41 tests, 0 failures.
 
 - [ ] **Step 5: Build and verify the real bundle**
 
@@ -1085,6 +1268,6 @@ No automated test can hold a device password, so this last check is manual and i
 
 ## Done when
 
-- `npm test` passes with 35 tests.
+- `npm test` passes with 41 tests.
 - `npm run bundle` exits 0, reporting a path, a size, and `11 tools`.
 - A device answers over `wss` when its TCP port is unreachable.
