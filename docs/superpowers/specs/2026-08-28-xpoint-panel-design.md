@@ -39,20 +39,40 @@ Measured on 2026-08-28 against a UCX-4x2-HC30 (`jimmy-hc30`, 192.168.2.104).
   pr /V1/MEDIA/VIDEO/XP/O2.Connected=true
   ```
   So routing needs no method call: a `SET` is sufficient.
-- `/V1/MEDIA/VIDEO/XP/<out>/SWITCHABLE` publishes per-source switchability, read-only. It is **not
-  uniform**:
+- `/V1/MEDIA/VIDEO/XP/<out>/SWITCHABLE` publishes per-source switchability, read-only. It is
+  **neither uniform nor static**. Two samples taken minutes apart, with the routing unchanged in
+  between only in the sense that both outputs sat on `I5`:
   ```
-  O1:  0=OK  I1=OK    I2=OK  I3=OK  I4=OK  I5=OK
-  O2:  0=OK  I1=Busy  I2=OK  I3=OK  I4=OK  I5=OK
+  first sample   O1:  0=OK  I1=OK    I2=OK  I3=OK  I4=OK  I5=OK
+                 O2:  0=OK  I1=Busy  I2=OK  I3=OK  I4=OK  I5=OK
+
+  later sample   O1:  0=OK  I1=Busy  I2=OK  I3=OK  I4=OK  I5=OK
+                 O2:  0=OK  I1=Busy  I2=OK  I3=OK  I4=OK  I5=OK
   ```
+  `Busy` reflects the device's **internal wiring**: `I1` and the Welcome Screen (`I5`) are connected
+  to the *same input of the internal crosspoint chip*. Only one of them can be in use at a time, so
+  while `I5` is routed to any output, `I1` reads `Busy` on every destination. The set of disabled
+  cells is therefore a consequence of the current routing and changes as a result of the user's own
+  clicks — routing `I5` away from every output frees `I1` again.
+
+  Note this is per-source contention, not per-cell: because the constraint is a shared chip input,
+  `I1` goes `Busy` on *all* destinations at once, which is what the two samples above show.
+
+  Two consequences for the panel: `SWITCHABLE` must be re-read after **every** switch, not only on
+  the poll timer, or the grid will show availability that the user just invalidated. And the panel
+  must display the device's own word (`Busy`) without inventing an explanation — the underlying
+  resource model is internal to the device and not something this project represents.
 - `0` is a legitimate source meaning disconnect. `MAN …:switch` states: *"Use `0` character as
   `<in>` to disconnect destination."*
 - Ports carry writable human names: `I1`="USB-C in 1", `I5`="Welcome Screen", `O1`="HDMI out 1".
 - This model has 5 inputs and 2 outputs.
 - `Mute` and `Lock` exist on **both** sources and destinations, not just destinations.
 - `MAN /V1/MEDIA/VIDEO/XP/O1.Lock` → *"If true, output is locked"*.
-- The whole grid is two calls — `GETALL /V1/MEDIA/VIDEO/XP/*` and `GETALL /V1/MEDIA/VIDEO/*` —
-  measured at **552 ms** together.
+- Routing and names are two calls — `GETALL /V1/MEDIA/VIDEO/XP/*` and `GETALL /V1/MEDIA/VIDEO/*` —
+  measured at **552 ms** together. `SWITCHABLE` is a child node per destination and is **not**
+  included in that sweep, so a full read is 2 + N calls, N being the destination count. On this
+  model that is four calls, roughly one second. On a device with many destinations that cost is what
+  would force a longer poll interval.
 
 ## Decisions
 
@@ -61,7 +81,7 @@ Measured on 2026-08-28 against a UCX-4x2-HC30 (`jimmy-hc30`, 192.168.2.104).
 | Panel scope | Switching only | Clicking a cell is the sole write the panel performs |
 | Mute and lock | Read, never written | A locked destination shows as disabled instead of failing mysteriously |
 | Data source | Poll the device directly | No cache to invalidate; the panel cannot show state the device does not hold |
-| Refresh | Every 3 seconds, paused when hidden | ~552 ms of device traffic per poll |
+| Refresh | Every 3 seconds, paused when hidden, and immediately after any switch | 2 + N calls per poll, ~1 s on this model. The post-switch read is required, not an optimisation: a switch changes which sources are `Busy` |
 | Write mechanism | `SET …ConnectedSource` | `ConnectedSource` is writable; no new command path |
 | Tool surface | One new tool, one `ui://` resource | The view reads and writes through the existing `GETALL` and `SET` tools |
 | Host without UI support | Text rendering of the same matrix | The tool stays useful in MCP Inspector and any non-UI client |
