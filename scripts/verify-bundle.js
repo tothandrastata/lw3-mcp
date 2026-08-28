@@ -39,6 +39,22 @@ export function assertRequiredEntries(entries) {
   );
 }
 
+/**
+ * One .mcpb is meant to install on Windows, macOS, and Linux. That only holds
+ * while every dependency is pure JavaScript — a compiled addon is built for one
+ * platform and silently breaks the other two.
+ */
+export function assertNoNativeBinaries(entries) {
+  const native = entries.filter((e) => e.toLowerCase().endsWith('.node'));
+  if (native.length === 0) return;
+  throw new Error(
+    `Bundle contains compiled native addons:\n  ${native.join('\n  ')}\n\n` +
+      'The bundle is built once and installed on every platform, so a compiled ' +
+      'addon makes it work only on the machine that built it. Reinstall without ' +
+      'optional native dependencies before shipping.'
+  );
+}
+
 export function listFilesRecursive(dir, prefix = '') {
   const out = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -158,7 +174,9 @@ export async function verifyBundle(mcpbPath) {
     });
     const root = findBundleRoot(workdir);
 
-    assertRequiredEntries(listFilesRecursive(root));
+    const entries = listFilesRecursive(root);
+    assertRequiredEntries(entries);
+    assertNoNativeBinaries(entries);
 
     const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
