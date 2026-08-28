@@ -65,10 +65,6 @@
       "description": "Execute a method on the connected Lightware device"
     },
     {
-      "name": "OPEN",
-      "description": "Open a subscription to a property on the connected Lightware device"
-    },
-    {
       "name": "MAN",
       "description": "Get manual/documentation for a property or method"
     }

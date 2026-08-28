@@ -269,16 +269,6 @@ export class LW3Protocol extends EventEmitter {
   }
 
   /**
-   * OPEN command - Open a subscription
-   * @param {string} property - Property path to subscribe to
-   * @returns {Promise<string>}
-   */
-  async open(property) {
-    const response = await this.sendCommand(`OPEN ${property}`);
-    return response;
-  }
-
-  /**
    * MAN command - Get manual/documentation for a property, node, or method
    * @param {string} path - Path to get manual for
    * @returns {Promise<string>}

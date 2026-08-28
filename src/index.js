@@ -177,24 +177,6 @@ class LW3MCPServer {
           },
         },
         {
-          name: 'OPEN',
-          description: 'Open a subscription to a property on the connected Lightware device',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              nodepath: {
-                type: 'string',
-                description: 'Node path (e.g., "/V1/EDID")',
-              },
-              property: {
-                type: 'string',
-                description: 'Property name (e.g., "EdidStatus")',
-              },
-            },
-            required: ['nodepath', 'property'],
-          },
-        },
-        {
           name: 'MAN',
           description: 'Get manual/documentation for a property or method',
           inputSchema: {
@@ -263,9 +245,6 @@ class LW3MCPServer {
 
           case 'CALL':
             return await this.handleCall(args);
-
-          case 'OPEN':
-            return await this.handleOpen(args);
 
           case 'MAN':
             return await this.handleMan(args);
@@ -416,23 +395,6 @@ class LW3MCPServer {
         {
           type: 'text',
           text: `Method "${fullPath}" called\nResponse: ${response}`,
-        },
-      ],
-    };
-  }
-
-  async handleOpen(args) {
-    this.ensureConnected();
-    const { nodepath, property } = args;
-
-    const fullPath = `${nodepath}.${property}`;
-    const response = await this.lw3.open(fullPath);
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Subscription opened for "${fullPath}"\nResponse: ${response}`,
         },
       ],
     };
