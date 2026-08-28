@@ -40,3 +40,10 @@ test('every tool registered in src/index.js is in the manifest', () => {
   assert.deepEqual(missing, [],
     `src/index.js registers tools absent from manifest.json: ${missing.join(', ')}`);
 });
+
+test('MCP Server constructor version tracks package.json', () => {
+  const match = serverSource.match(/new Server\(\s*\{\s*name:\s*'[^']+',\s*version:\s*'([^']+)'/);
+  assert.ok(match, 'could not find `new Server({ name: ..., version: ... })` in src/index.js');
+  assert.equal(match[1], pkg.version,
+    `src/index.js hardcodes Server version '${match[1]}'; update that literal to match package.json's "${pkg.version}"`);
+});

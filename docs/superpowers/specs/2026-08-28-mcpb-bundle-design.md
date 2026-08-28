@@ -25,7 +25,7 @@ zero-prerequisite install possible on machines that have never had Node.
 | Decision | Choice | Consequence |
 |---|---|---|
 | Device selection | No `user_config`; `discover` then `connect` each session | `src/` needs no changes at all |
-| Dependency packing | Vendor pruned `node_modules` | ~18 MB bundle, no build tooling, ships what was tested |
+| Dependency packing | Vendor pruned `node_modules` | ~2.5 MB packed bundle (the ~18 MB dependency tree compresses well), no build tooling, ships what was tested |
 | Packer | `npx @anthropic-ai/mcpb pack` | Manifest validated at build time, no new package.json deps |
 | Distribution | Versioned filename + `INSTALL.md` | Colleagues can identify their build without opening Claude Desktop |
 
@@ -134,4 +134,4 @@ explicitly the operator's responsibility: a real drag-and-drop install into Clau
 | Packer honors `.gitignore` and drops `node_modules` | Verification step 1 fails the build |
 | Manifest schema differs from this document | `mcpb validate` before packing; CLI is authoritative |
 | `npx` unreachable on the build machine | Build fails loudly; PowerShell `Compress-Archive` fallback exists but was deliberately not built |
-| 18 MB is awkward for the file server | Accepted; esbuild path stays available if it becomes a problem |
+| Packed bundle is large enough to be awkward for the file server | Not observed in practice: the packed artifact is ~2.5 MB, since the ~18 MB dependency tree compresses well. esbuild path stays available if a future dependency changes that |

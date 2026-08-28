@@ -21,13 +21,16 @@ const run = (cmd, args) => execFileSync(cmd, args, { cwd: root, stdio: 'inherit'
 
 console.log(`Building lw3-mcp ${pkg.version}`);
 
-console.log('\n[1/4] Installing production dependencies');
+console.log('\n[1/5] Running tests');
+run(npm, ['test']);
+
+console.log('\n[2/5] Installing production dependencies');
 run(npm, ['ci', '--omit=dev']);
 
-console.log('\n[2/4] Validating manifest');
+console.log('\n[3/5] Validating manifest');
 run(npx, ['-y', MCPB, 'validate', 'manifest.json']);
 
-console.log('\n[3/4] Packing');
+console.log('\n[4/5] Packing');
 mkdirSync(join(root, 'dist'), { recursive: true });
 run(npx, ['-y', MCPB, 'pack', '.', quoteArg(outFile)]);
 
@@ -35,7 +38,7 @@ if (!existsSync(outFile)) {
   throw new Error(`Packer reported success but ${outFile} does not exist`);
 }
 
-console.log('\n[4/4] Verifying');
+console.log('\n[5/5] Verifying');
 const { toolCount } = await verifyBundle(outFile);
 
 const mb = (statSync(outFile).size / 1024 / 1024).toFixed(1);

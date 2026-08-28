@@ -513,7 +513,7 @@ Run: `npm run bundle`
 Expected: the four steps print in order and the final line reads roughly
 
 ```
-OK  C:\Taurus\lw3-mcp\dist\lw3-mcp-1.0.0.mcpb  (18.x MB, 11 tools)
+OK  C:\Taurus\lw3-mcp\dist\lw3-mcp-1.0.0.mcpb  (2.5 MB, 11 tools)
 ```
 
 If step 4 fails naming missing `node_modules/` entries, the packer honored `.gitignore`. Fix it by moving the exclusion list entirely into `.mcpbignore`, or by adding an explicit negation for `node_modules/`, then re-run until verification passes. Do not disable or weaken the check to get a green build.

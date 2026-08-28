@@ -26,7 +26,9 @@ Ask Claude:
 - *"Discover Lightware devices on the network"* — lists model name, serial
   number, IP address, and hostname for everything it finds.
 - *"Connect to 192.168.2.109"* — opens the LW3 connection. The hostname from
-  discovery works too.
+  discovery works too, though on a locked-down corporate machine `.local` mDNS
+  names sometimes fail to resolve even when the device itself is reachable; the
+  IP address is the safer bet if that happens.
 - *"Show me the root structure"* — dumps the device tree.
 - *"Read /V1/MANAGEMENT/NETWORK.HostName"*
 

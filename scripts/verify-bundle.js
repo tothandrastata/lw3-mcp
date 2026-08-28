@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, readdirSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, existsSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 
@@ -119,6 +119,36 @@ function listTools(entryPoint) {
   });
 }
 
+// Claude Desktop shows the packed manifest.json's version in Settings > Extensions.
+// The dist filename is built from package.json's version (see scripts/bundle.js). If a
+// version bump only touches one of the two, the file people download lies about what
+// they'll see installed, and the version-check procedure in INSTALL.md breaks.
+export function assertPackedVersionsMatch(manifest, pkg) {
+  if (manifest.version !== pkg.version) {
+    throw new Error(
+      `Packed manifest.json version ("${manifest.version}") does not match packed package.json version ` +
+        `("${pkg.version}"). Claude Desktop's Settings > Extensions reads manifest.json, so it would display ` +
+        `"${manifest.version}" for a bundle whose filename claims "${pkg.version}". Bump both together before shipping.`
+    );
+  }
+}
+
+// The manifest is the source of truth for how Claude Desktop launches the server, so the
+// verifier launches the same way rather than assuming the conventional src/index.js path.
+export function resolveEntryPoint(root, manifest) {
+  const entryPoint = manifest.server?.entry_point;
+  if (!entryPoint) {
+    throw new Error('manifest.json is missing server.entry_point; cannot determine what to launch');
+  }
+  const resolved = join(root, entryPoint);
+  if (!existsSync(resolved)) {
+    throw new Error(
+      `manifest.json server.entry_point ("${entryPoint}") does not exist in the unpacked bundle at ${resolved}`
+    );
+  }
+  return resolved;
+}
+
 export async function verifyBundle(mcpbPath) {
   const workdir = mkdtempSync(join(tmpdir(), 'lw3-mcpb-'));
   try {
@@ -130,16 +160,29 @@ export async function verifyBundle(mcpbPath) {
 
     assertRequiredEntries(listFilesRecursive(root));
 
-    const tools = await listTools(join(root, 'src', 'index.js'));
-    if (tools.length !== 11) {
+    const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    assertPackedVersionsMatch(manifest, pkg);
+
+    const entryPoint = resolveEntryPoint(root, manifest);
+    const expectedToolCount = manifest.tools.length;
+
+    const tools = await listTools(entryPoint);
+    if (tools.length !== expectedToolCount) {
       throw new Error(
-        `Expected 11 tools from the unpacked server, got ${tools.length}: ` +
-          tools.map((t) => t.name).join(', ')
+        `Expected ${expectedToolCount} tools declared in manifest.json, got ${tools.length} from the ` +
+          `unpacked server: ${tools.map((t) => t.name).join(', ')}`
       );
     }
     return { toolCount: tools.length, root };
   } finally {
-    rmSync(workdir, { recursive: true, force: true });
+    try {
+      rmSync(workdir, { recursive: true, force: true });
+    } catch {
+      // A just-killed child process can still hold the tree open on Windows, turning
+      // cleanup into EBUSY/EPERM. That would mask whatever real failure is already
+      // propagating out of the try block above, so cleanup failure is ignored.
+    }
   }
 }
 
