@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "lw3-mcp",
   "display_name": "Lightware LW3 Gateway",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Discover and control Lightware devices over the LW3 protocol",
   "author": {
     "name": "Andras Toth",
@@ -68,7 +68,10 @@
       "name": "MAN",
       "description": "Get manual/documentation for a property or method"
     },
-    { "name": "xpoint", "description": "Show the video crosspoint: which source is routed to each destination, and which sources each destination can switch to" }
+    {
+      "name": "xpoint",
+      "description": "Show the video crosspoint: which source is routed to each destination, and which sources each destination can switch to"
+    }
   ],
   "compatibility": {
     "platforms": [
