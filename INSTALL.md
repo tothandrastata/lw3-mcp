@@ -1,6 +1,6 @@
 # Lightware LW3 Gateway — Install
 
-Adds ten tools to Claude Desktop for discovering and controlling Lightware
+Adds eleven tools to Claude Desktop for discovering and controlling Lightware
 devices over LW3.
 
 Prefer step-by-step pictures? See [WALKTHROUGH.md](WALKTHROUGH.md).
@@ -45,6 +45,7 @@ Ask Claude:
   IP address is the safer bet if that happens.
 - *"Show me the root structure"* — dumps the device tree.
 - *"Read /V1/MANAGEMENT/NETWORK.HostName"*
+- *"Show me the video crosspoint"* — which source is routed to each output, and what each output can switch to.
 
 The connection stays open for the whole Claude Desktop session. Only one device
 at a time; ask Claude to disconnect before connecting to another.

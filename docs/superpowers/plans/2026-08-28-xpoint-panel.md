@@ -89,20 +89,28 @@ A spike. Its deliverable is a fact, not code — and that fact decides whether T
 
 - [ ] **Step 1: Log what the client advertises**
 
-In `src/index.js`, inside the `LW3MCPServer` constructor, immediately after `this.server = new Server(...)`, add:
+In `src/index.js`, in `run()`, immediately after `await this.server.connect(transport)`, add:
 
 ```js
-    // TEMPORARY probe — removed in step 5. Records what the host advertises at
-    // initialize, to establish whether it supports the MCP Apps UI extension.
-    this.server.oninitialized = () => {
-      const client = this.server.getClientVersion?.();
-      const caps = this.server.getClientCapabilities?.();
-      console.error('[PROBE] client:', JSON.stringify(client));
-      console.error('[PROBE] capabilities:', JSON.stringify(caps));
+    // TEMPORARY probe — removed in step 5. Logs the raw initialize params to
+    // establish whether this host advertises the MCP Apps UI extension.
+    //
+    // The raw message is captured rather than server.getClientCapabilities(),
+    // which returns only params.capabilities: the extension is advertised "in
+    // the initialize request", and if it sits outside that field a capabilities
+    // -only probe would report a false negative.
+    const inner = transport.onmessage;
+    transport.onmessage = (message) => {
+      if (message?.method === 'initialize') {
+        console.error('[PROBE] initialize params:', JSON.stringify(message.params));
+      }
+      inner?.(message);
     };
 ```
 
-`console.error` is correct here: stdout carries the MCP protocol, and Claude Desktop captures stderr into its per-server log.
+`console.error` is correct here: stdout carries the MCP protocol, and Claude Desktop captures stderr into its per-server log — confirmed by this project's own "MCP LW3 Gateway server running on stdio" line appearing there.
+
+Wrapping after `connect()` matters: `connect()` installs its own `onmessage`, so wrapping before it would be overwritten.
 
 - [ ] **Step 2: Restart Claude Desktop and exercise the server**
 
@@ -618,6 +626,13 @@ git commit -m "Add the xpoint tool with a text crosspoint rendering"
 ---
 
 ### Task 4: The panel
+
+**Skipped, not merely undone.** Task 1's probe never fired — Claude Desktop was running the
+installed `.mcpb` extension rather than this source tree — so host support for
+`io.modelcontextprotocol/ui` is still unconfirmed. See the outcome note at the top of the spec.
+Tasks 2 and 3 shipped regardless, since the tool and its text rendering do not depend on the
+answer. This task stays unticked deliberately until host support is confirmed from a build
+actually running inside Claude Desktop.
 
 **Only if Task 1 concluded that the host advertises `io.modelcontextprotocol/ui`.** If it did not, stop here and report that Task 4 was skipped and why.
 

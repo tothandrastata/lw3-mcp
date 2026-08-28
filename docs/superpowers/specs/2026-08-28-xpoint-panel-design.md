@@ -1,7 +1,16 @@
 # Crosspoint panel (MCP Apps)
 
 **Date:** 2026-08-28
-**Status:** Approved, pending implementation
+**Status:** Decided — shipping the model and the text tool only; panel deferred until host support is confirmed
+
+> **Outcome (2026-08-29):** The probe described in "Gating unknown" below was run and came back
+> inconclusive, not negative: Claude Desktop was running the *installed* `.mcpb` extension rather
+> than this source tree, so the probed `src/index.js` was never the code actually executing, and
+> the probe never fired. Whether Claude Desktop advertises `io.modelcontextprotocol/ui` is still
+> unknown. Rather than reinstall a probe build to find out, the decision is to ship what does not
+> depend on the answer: the grid model (`src/xpoint.js`) and the `xpoint` tool's text rendering,
+> which are useful in any host. The HTML panel (Task 4 below) stays unbuilt until host support for
+> MCP Apps is confirmed from a build actually running inside Claude Desktop.
 
 ## Goal
 

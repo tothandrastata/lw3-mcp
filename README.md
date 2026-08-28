@@ -22,7 +22,7 @@ One requirement worth repeating here: **the machine must be on the same network 
 npm install
 npm start          # run the server on stdio
 npm run dev        # same, with --watch
-npm test           # 85 tests, node:test, no test framework needed
+npm test           # 113 tests, node:test, no test framework needed
 npm run bundle     # build the distributable .mcpb
 ```
 
@@ -93,7 +93,7 @@ Register it in `src/index.js` (the `ListToolsRequestSchema` entry, the `switch` 
 
 ## Available tools
 
-Ten tools. All of them take **separated** `nodepath` and `property`/`method` parameters rather than one combined path string, so a value returned by `GETALL` can be passed straight into `GET` or `CALL`.
+Eleven tools. All the LW3 commands take **separated** `nodepath` and `property`/`method` parameters rather than one combined path string, so a value returned by `GETALL` can be passed straight into `GET` or `CALL`.
 
 ### Discovery and connection
 
@@ -126,6 +126,12 @@ Ten tools. All of them take **separated** `nodepath` and `property`/`method` par
 - **MAN** — Fetch the device's own documentation for a property or method
   - `nodepath` (required), `item` (required)
   - Note this uses the `.` separator even when `item` is a method name
+
+### Video crosspoint
+
+- **xpoint** — Show the video crosspoint: which source is routed to each destination, and which sources each destination can currently switch to
+  - No parameters. Reads `/V1/MEDIA/VIDEO/XP` and `/V1/MEDIA/VIDEO`, plus a per-destination `SWITCHABLE` read, and renders the result as text
+  - Switchability is read per destination and is not assumed uniform across them — a source `Busy` on one output can be `OK` on another, so nothing is cached, inferred, or predicted; a destination whose read fails is reported as unread rather than as refused
 
 ## How discovery works
 
@@ -178,7 +184,8 @@ lw3-mcp/
 │   ├── transports/
 │   │   ├── tcp.js               # raw TCP socket, port 6107
 │   │   └── wss.js               # secure WebSocket fallback, wss://<host>/lw3
-│   └── lightware-discovery.js   # mDNS device discovery
+│   ├── lightware-discovery.js   # mDNS device discovery
+│   └── xpoint.js                # pure video crosspoint grid model + text rendering
 ├── scripts/
 │   ├── bundle.js                # npm run bundle
 │   └── verify-bundle.js         # unpack-and-run verification

@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm install
 npm start                                          # run the server on stdio
 npm run dev                                         # same, with --watch
-npm test                                            # 85 tests, node:test — no framework, no config
+npm test                                            # 113 tests, node:test — no framework, no config
 npm run bundle                                      # build dist/lw3-mcp-<version>.mcpb (scripts/bundle.js)
 npx @modelcontextprotocol/inspector node src/index.js   # interactive tool testing
 ```
@@ -23,7 +23,8 @@ There is no linter. `npm test` runs `tests/*.js` with `node:test`; `npm run bund
 
 ## Architecture
 
-- [src/index.js](src/index.js) — `LW3MCPServer`. Registers 10 MCP tools, owns the single `LW3Protocol` instance for the process lifetime, and **builds the LW3 path strings**. The protocol layer never assembles paths.
+- [src/index.js](src/index.js) — `LW3MCPServer`. Registers 11 MCP tools, owns the single `LW3Protocol` instance for the process lifetime, and **builds the LW3 path strings**. The protocol layer never assembles paths.
+- [src/xpoint.js](src/xpoint.js) — Pure video-crosspoint model: turns `GETALL` lines into a `{sources, destinations, switchable}` grid, decides each cell's state (`cellState`), and renders the grid as text (`renderGridText`). No protocol, no sockets; `handleXpoint` in `index.js` is the only caller.
 - [src/lw3-protocol.js](src/lw3-protocol.js) — `LW3Protocol extends EventEmitter`. Owns no socket itself: line buffering, command queue, GETALL response parsing, and the TCP→WSS fallback in `connect()`. Transport construction is injected via `createTcp`/`createWss` factories passed to the constructor, so tests substitute fakes instead of opening real sockets (see `tests/fallback.test.js`).
 - [src/transports/tcp.js](src/transports/tcp.js) — `TcpTransport extends EventEmitter`. Raw TCP socket, port 6107 by default. `connect()` is bounded by `CONNECT_TIMEOUT_MS` (3s) so a silently dropped connection fails fast instead of waiting on the OS. Emits `data` (strings), `close`, `error`.
 - [src/transports/wss.js](src/transports/wss.js) — `WssTransport extends EventEmitter`. Secure WebSocket to `wss://<host>/lw3`; `rejectUnauthorized: false` because devices self-sign. `connect()` uses the same `CONNECT_TIMEOUT_MS` as a `handshakeTimeout`. Sends HTTP Basic auth as the `admin` user when a password is supplied; a 401 response throws `AuthRequiredError` (distinguishing "no password yet" from "password rejected") so `index.js` can ask the user for it instead of reporting a generic failure. Same `data`/`close`/`error` event shape as `TcpTransport`, so `LW3Protocol` treats both uniformly.
