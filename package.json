@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node --test tests/*.js"
+    "test": "node --test tests/*.js",
+    "bundle": "node scripts/bundle.js"
   },
   "keywords": [
     "mcp",
