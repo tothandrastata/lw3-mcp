@@ -18,7 +18,13 @@ import { buildGrid, renderGridText, XP_NODE, VIDEO_NODE } from './xpoint.js';
 // The resource URI the xpoint tool points hosts at, and hosts fetch. Shared
 // between the ListResources/ReadResource handlers and the tool's own _meta so
 // there is exactly one string to keep in sync.
-const XPOINT_UI = 'ui://lw3-mcp/xpoint';
+// Deliberately NOT 'ui://lw3-mcp/xpoint'. That URI was first published by
+// 1.6.0, which had not yet declared the io.modelcontextprotocol/ui capability,
+// so the host saw it as an ordinary resource. It has never rendered since --
+// through eight releases, every change of content, size and result shape --
+// while every freshly named probe URI rendered on its first use. That pattern
+// is a host-side cache keyed by URI, and a new name is the only way past it.
+const XPOINT_UI = 'ui://lw3-mcp/xpoint-panel-v2';
 
 // A deliberately minimal second app, used to tell "this host renders no MCP
 // Apps at all" apart from "the crosspoint panel renders but is invisible".
@@ -40,7 +46,7 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '1.7.6',
+        version: '1.7.7',
       },
       {
         capabilities: {
