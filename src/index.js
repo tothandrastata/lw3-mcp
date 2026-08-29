@@ -1,14 +1,24 @@
 #!/usr/bin/env node
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { LW3Protocol } from './lw3-protocol.js';
 import { LightwareDiscovery } from './lightware-discovery.js';
 import { buildGrid, renderGridText, XP_NODE, VIDEO_NODE } from './xpoint.js';
+
+// The resource URI the xpoint tool points hosts at, and hosts fetch. Shared
+// between the ListResources/ReadResource handlers and the tool's own _meta so
+// there is exactly one string to keep in sync.
+const XPOINT_UI = 'ui://lw3-mcp/xpoint';
 
 /**
  * MCP Server for Lightware LW3 Protocol Gateway
@@ -24,6 +34,7 @@ class LW3MCPServer {
       {
         capabilities: {
           tools: {},
+          resources: {},
         },
       }
     );
@@ -225,9 +236,38 @@ class LW3MCPServer {
             type: 'object',
             properties: {},
           },
+          _meta: { ui: { resourceUri: XPOINT_UI } },
         },
       ],
     }));
+
+    // Serve the crosspoint panel to hosts that support the MCP Apps UI
+    // extension. Read from disk on every request rather than cached at
+    // startup, so the bundle's on-disk HTML is always what gets served.
+    const uiPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'xpoint.html');
+
+    this.server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+      // Kept on one line: tests/manifest.test.js counts registered *tools* by
+      // matching a 10-space-indented `name: '...'`, and this resource's own
+      // `name` field would otherwise land at that same indent and be
+      // miscounted as a 12th tool.
+      resources: [{ uri: XPOINT_UI, name: 'Crosspoint panel', mimeType: 'text/html;profile=mcp-app' }],
+    }));
+
+    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+      if (request.params.uri !== XPOINT_UI) {
+        throw new Error(`Unknown resource: ${request.params.uri}`);
+      }
+      return {
+        contents: [
+          {
+            uri: XPOINT_UI,
+            mimeType: 'text/html;profile=mcp-app',
+            text: readFileSync(uiPath, 'utf8'),
+          },
+        ],
+      };
+    });
 
     // Handle tool calls
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -588,6 +628,7 @@ class LW3MCPServer {
 
     return {
       content: [{ type: 'text', text }],
+      _meta: { ui: { resourceUri: XPOINT_UI } },
     };
   }
 
