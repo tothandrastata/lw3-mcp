@@ -729,9 +729,13 @@ async function refresh() {
       // The grid on screen came with the tool result and is still what the
       // device reported. Only live refresh is unavailable, so say that rather
       // than raising an alarm over data that is fine.
-      stage('showing tool-result data; live refresh unavailable (' +
-        (err && err.message ? err.message : String(err)) + ')');
-      setStatus('Not live — re-run xpoint to refresh');
+      // Expected, not a fault: the panel's own tool calls reach a different
+      // server instance than the one holding the device connection, so the
+      // refresh was never going to work. The grid on screen came with the tool
+      // result and is exactly what the device reported. A quiet status line
+      // says so; the red bar is for things that are actually wrong.
+      stage(null);
+      setStatus('Snapshot — re-run xpoint to refresh');
     } else {
       stage('device read FAILED: ' + (err && err.message ? err.message : String(err)));
       setBanner(err.message, { stale: true });
