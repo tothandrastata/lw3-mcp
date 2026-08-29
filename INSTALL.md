@@ -1,6 +1,6 @@
 # Lightware LW3 Gateway — Install
 
-Adds thirteen tools to Claude Desktop for discovering and controlling Lightware
+Adds fourteen tools to Claude Desktop for discovering and controlling Lightware
 devices over LW3.
 
 Prefer step-by-step pictures? See [WALKTHROUGH.md](WALKTHROUGH.md).

@@ -40,7 +40,7 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '1.7.5',
+        version: '1.7.6',
       },
       {
         capabilities: {
@@ -250,6 +250,16 @@ class LW3MCPServer {
           },
         },
         {
+          name: 'uiprobexp',
+          description:
+            'Diagnostic: render the crosspoint panel document from a minimal tool result, to test whether the document or the tool result is at fault. Takes no arguments and does not touch the device.',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+          },
+          _meta: { ui: { resourceUri: XPOINT_UI } },
+        },
+        {
           name: 'uiprobebig',
           description:
             'Diagnostic: same panel as uiprobe but padded to a larger document, to test whether this host refuses oversized UI resources. Takes no arguments and does not touch the device.',
@@ -354,6 +364,22 @@ class LW3MCPServer {
 
           case 'discover':
             return await this.handleDiscover(args);
+
+          case 'uiprobexp':
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text:
+                    'Crosspoint document requested through a minimal tool result. You cannot ' +
+                    'see rendered MCP App panels, so do not state whether it appeared -- ask ' +
+                    'the user. A red "stage:" bar means the document is fine and the fault is ' +
+                    'in the xpoint tool result; no bar means the document itself is at fault. ' +
+                    'No device I/O was performed.',
+                },
+              ],
+              _meta: { ui: { resourceUri: XPOINT_UI } },
+            };
 
           case 'uiprobebig':
             return {
@@ -708,10 +734,6 @@ class LW3MCPServer {
 
     return {
       content: [{ type: 'text', text }],
-      // The panel hydrates from this instead of waiting on its first poll.
-      // Per the MCP Apps spec structuredContent is not added to the model's
-      // context, so this costs the conversation nothing.
-      structuredContent: grid,
       _meta: { ui: { resourceUri: XPOINT_UI } },
     };
   }
