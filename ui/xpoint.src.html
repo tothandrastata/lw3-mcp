@@ -557,12 +557,23 @@ async function switchRoute(destPort, srcPort) {
       // possible, report what actually went wrong rather than the connect
       // failure that followed it.
       let opened = false;
+      let connectError = null;
       try {
         opened = await connectSelf();
-      } catch (connectError) {
-        opened = false;
+      } catch (err) {
+        connectError = err;
       }
-      if (!opened) throw firstError;
+      if (!opened) {
+        // Which error to report matters. Reporting the SET failure ("Not
+        // connected") hides the actionable one -- that the device wants a
+        // password -- and the caller then stages a chat prompt instead of
+        // asking for it. So an authentication failure wins; anything else
+        // leaves the original SET error, which is the more informative of
+        // the two when connecting was never the problem.
+        throw connectError && /requires authentication|rejected that password/i.test(connectError.message)
+          ? connectError
+          : firstError;
+      }
       await applySwitch();
     }
   } catch (directError) {

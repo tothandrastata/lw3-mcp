@@ -11,7 +11,7 @@ import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { LW3Protocol } from './lw3-protocol.js';
+import { LW3Protocol, parseGetAll } from './lw3-protocol.js';
 import { LightwareDiscovery } from './lightware-discovery.js';
 import { buildGrid, renderGridText, XP_NODE, VIDEO_NODE } from './xpoint.js';
 
@@ -42,7 +42,7 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '1.9.2',
+        version: '1.9.3',
       },
       {
         capabilities: {
@@ -458,7 +458,13 @@ class LW3MCPServer {
       throw new Error('Node path is required for GETALL. Use GETROOT to get the root structure.');
     }
 
-    const result = await this.lw3.getAll(path);
+    // A trailing /* asks for the children's contents. Devices differ on whether
+    // they accept the syntax (the Taurus emulator does not), so route it through
+    // getAllDeep, which falls back to enumerating the children. Callers -- the
+    // crosspoint panel among them -- then get the same answer from either.
+    const result = path.endsWith('/*')
+      ? parseGetAll(await this.lw3.getAllDeep(path.slice(0, -2)))
+      : await this.lw3.getAll(path);
 
     return {
       content: [
