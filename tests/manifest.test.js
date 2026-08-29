@@ -34,7 +34,7 @@ test('every tool in the manifest is registered in src/index.js', () => {
 
 test('every tool registered in src/index.js is in the manifest', () => {
   const registered = [...serverSource.matchAll(/^ {10}name: '([^']+)',$/gm)].map((m) => m[1]);
-  assert.equal(registered.length, 12, 'expected 12 registered tools');
+  assert.equal(registered.length, 13, 'expected 13 registered tools');
   const declared = new Set(manifest.tools.map((t) => t.name));
   const missing = registered.filter((n) => !declared.has(n));
   assert.deepEqual(missing, [],

@@ -24,6 +24,11 @@ const SDK = join(
 const PANELS = [
   { src: join(ROOT, 'ui/xpoint.src.html'), out: join(ROOT, 'ui/xpoint.html') },
   { src: join(ROOT, 'ui/probe.src.html'), out: join(ROOT, 'ui/probe.html') },
+  // The same probe, padded past the crosspoint panel's size. The two panels
+  // differ in nothing but length, so if this one stops rendering the host has
+  // a size ceiling; if it renders, size is ruled out and the difference is in
+  // what the crosspoint panel's document contains.
+  { src: join(ROOT, 'ui/probe.src.html'), out: join(ROOT, 'ui/probe-big.html'), padTo: 360000 },
 ];
 const PLACEHOLDER = '/* __MCP_APPS_SDK__ */';
 
@@ -66,12 +71,20 @@ const inlined = [
 // substitution patterns when the replacement is a plain string, splicing parts
 // of this very document into the middle of the script. A replacer function is
 // handed the text verbatim.
-for (const { src: srcPath, out } of PANELS) {
+for (const { src: srcPath, out, padTo } of PANELS) {
   const src = readFileSync(srcPath, 'utf8');
   if (!src.includes(PLACEHOLDER)) {
     throw new Error(`${srcPath} is missing the ${PLACEHOLDER} marker`);
   }
-  writeFileSync(out, src.replace(PLACEHOLDER, () => inlined), 'utf8');
+  let html = src.replace(PLACEHOLDER, () => inlined);
+  if (padTo && html.length < padTo) {
+    // An HTML comment of X's: inert, and the SDK bundle provably contains no
+    // "-->" that could close it early (checked before inlining was adopted).
+    const filler = 'X'.repeat(padTo - html.length - 20);
+    html = html.replace('</body>', () => `<!-- ${filler} -->
+</body>`);
+  }
+  writeFileSync(out, html, 'utf8');
 }
 
 const version = JSON.parse(

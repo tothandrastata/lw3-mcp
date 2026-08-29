@@ -26,6 +26,11 @@ const XPOINT_UI = 'ui://lw3-mcp/xpoint';
 // the wiring rather than the panel.
 const PROBE_UI = 'ui://lw3-mcp/probe';
 
+// The probe again, padded past the crosspoint panel's length and identical in
+// every other respect. It exists to answer one question: does this host refuse
+// to render a UI resource above some size?
+const PROBE_BIG_UI = 'ui://lw3-mcp/probe-big';
+
 /**
  * MCP Server for Lightware LW3 Protocol Gateway
  * Provides persistent connection and tools for interacting with Lightware devices
@@ -35,7 +40,7 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '1.7.4',
+        version: '1.7.5',
       },
       {
         capabilities: {
@@ -245,6 +250,16 @@ class LW3MCPServer {
           },
         },
         {
+          name: 'uiprobebig',
+          description:
+            'Diagnostic: same panel as uiprobe but padded to a larger document, to test whether this host refuses oversized UI resources. Takes no arguments and does not touch the device.',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+          },
+          _meta: { ui: { resourceUri: PROBE_BIG_UI } },
+        },
+        {
           name: 'uiprobe',
           description:
             'Diagnostic: render a minimal MCP Apps panel to check whether this host displays interactive UI at all. Takes no arguments and does not touch the device.',
@@ -273,6 +288,7 @@ class LW3MCPServer {
     const uiDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui');
     const uiPath = join(uiDir, 'xpoint.html');
     const probePath = join(uiDir, 'probe.html');
+    const probeBigPath = join(uiDir, 'probe-big.html');
 
     this.server.setRequestHandler(ListResourcesRequestSchema, async () => ({
       // Kept on one line: tests/manifest.test.js counts registered *tools* by
@@ -282,11 +298,12 @@ class LW3MCPServer {
       resources: [
         { uri: XPOINT_UI, name: 'Crosspoint panel', mimeType: 'text/html;profile=mcp-app' },
         { uri: PROBE_UI, name: 'MCP Apps probe', mimeType: 'text/html;profile=mcp-app' },
+        { uri: PROBE_BIG_UI, name: 'MCP Apps probe (padded)', mimeType: 'text/html;profile=mcp-app' },
       ],
     }));
 
     this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-      const files = { [XPOINT_UI]: uiPath, [PROBE_UI]: probePath };
+      const files = { [XPOINT_UI]: uiPath, [PROBE_UI]: probePath, [PROBE_BIG_UI]: probeBigPath };
       const file = files[request.params.uri];
       if (!file) {
         throw new Error(`Unknown resource: ${request.params.uri}`);
@@ -337,6 +354,21 @@ class LW3MCPServer {
 
           case 'discover':
             return await this.handleDiscover(args);
+
+          case 'uiprobebig':
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text:
+                    'Padded diagnostic panel requested. You cannot see rendered MCP App ' +
+                    'panels, so do not state whether it appeared -- ask the user. A red box ' +
+                    'means this host renders UI resources of this size; no box means it ' +
+                    'refuses them. No device I/O was performed.',
+                },
+              ],
+              _meta: { ui: { resourceUri: PROBE_BIG_UI } },
+            };
 
           case 'uiprobe':
             return {
