@@ -46,7 +46,7 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '1.7.7',
+        version: '1.7.8',
       },
       {
         capabilities: {
@@ -740,6 +740,11 @@ class LW3MCPServer {
 
     return {
       content: [{ type: 'text', text }],
+      // The panel renders from this. It cannot fetch its own data: app-initiated
+      // tool calls do not reach the server instance holding the LW3 connection,
+      // so a panel that polled would show "Not connected" while the chat beside
+      // it was connected. The host hands this straight to the view.
+      structuredContent: grid,
       _meta: { ui: { resourceUri: XPOINT_UI } },
     };
   }

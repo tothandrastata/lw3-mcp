@@ -325,6 +325,29 @@ const app = new App({ name: 'lw3-xpoint', version: '1.0.0' });
 // attached afterwards.
 app.onerror = (err) => { console.error('[xpoint] app error:', err); };
 
+// The host delivers the tool's result here. This -- not polling -- is how the
+// panel gets its data: app-initiated tool calls reach a different server
+// instance than the one holding the device connection, so the grid has to
+// arrive with the result that opened the panel.
+//
+// Registered before connect(): the SDK does not deliver to handlers attached
+// afterwards, and this one carries the only data the panel will ever see.
+app.ontoolresult = (result) => {
+  try {
+    const grid = result && result.structuredContent;
+    if (!grid || !grid.destinations || !grid.sources) return;
+    lastGrid = grid;
+    hydrated = true;
+    render(grid);
+    setBanner(null);
+    setStatus('Updated ' + new Date().toLocaleTimeString());
+    stage('rendered ' + grid.destinations.length + ' x ' + grid.sources.length + ' grid from tool result');
+    reportSize();
+  } catch (err) {
+    stage('tool-result render FAILED: ' + (err && err.message ? err.message : String(err)));
+  }
+};
+
 /**
  * Breadcrumb to the HOST's console, not this frame's.
  *
@@ -457,6 +480,7 @@ const statusEl = document.getElementById('status');
 const appEl = document.getElementById('app');
 
 let lastGrid = null;
+let hydrated = false;
 let busy = false;
 let polling = false;
 
@@ -569,8 +593,17 @@ async function refresh() {
     // routed", which is a stronger and different claim than "the last
     // read failed".
     if (lastGrid) render(lastGrid);
-    stage('device read FAILED: ' + (err && err.message ? err.message : String(err)));
-    setBanner(err.message, { stale: true });
+    if (hydrated) {
+      // The grid on screen came with the tool result and is still what the
+      // device reported. Only live refresh is unavailable, so say that rather
+      // than raising an alarm over data that is fine.
+      stage('showing tool-result data; live refresh unavailable (' +
+        (err && err.message ? err.message : String(err)) + ')');
+      setStatus('Not live — re-run xpoint to refresh');
+    } else {
+      stage('device read FAILED: ' + (err && err.message ? err.message : String(err)));
+      setBanner(err.message, { stale: true });
+    }
   }
 }
 
