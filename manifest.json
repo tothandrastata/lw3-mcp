@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "lw3-mcp",
   "display_name": "Lightware LW3 Gateway",
-  "version": "1.12.1",
+  "version": "2.0.0",
   "description": "Discover and control Lightware devices over the LW3 protocol",
   "author": {
     "name": "Andras Toth",
@@ -67,10 +67,6 @@
     {
       "name": "MAN",
       "description": "Get manual/documentation for a property or method"
-    },
-    {
-      "name": "univ_xpoint",
-      "description": "Show the crosspoint of any supported device family, detecting the routing dialect from what the device publishes"
     },
     {
       "name": "xpoint",

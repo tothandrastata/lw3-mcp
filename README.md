@@ -56,8 +56,7 @@ npm run bundle
 
 Produces `dist/lw3-mcp-<version>.mcpb`, roughly 3.3 MB, with the version read from `package.json` so the filename cannot drift from the contents. Two generation steps run first, then six build steps, and it refuses to report success unless all of them pass:
 
-- `derive-univ-panel` — regenerates `ui/univ-xpoint.src.html` from `ui/xpoint.src.html`
-- `build-panel` — inlines the MCP Apps SDK and the grid models into both panels
+- `build-panel` — inlines the MCP Apps SDK and the grid model into the panel
 
 1. `npm test` — catches manifest drift before anything is packed
 2. `npm ci --omit=dev` — reinstalls from the lockfile so the build is reproducible
@@ -103,7 +102,7 @@ Register it in `src/index.js` (the `ListToolsRequestSchema` entry, the `switch` 
 
 ## Available tools
 
-Twelve tools. All the LW3 commands take **separated** `nodepath` and `property`/`method` parameters rather than one combined path string, so a value returned by `GETALL` can be passed straight into `GET` or `CALL`.
+Eleven tools. All the LW3 commands take **separated** `nodepath` and `property`/`method` parameters rather than one combined path string, so a value returned by `GETALL` can be passed straight into `GET` or `CALL`.
 
 ### Discovery and connection
 
@@ -141,20 +140,16 @@ Twelve tools. All the LW3 commands take **separated** `nodepath` and `property`/
 
 ### Video crosspoint
 
-Both take no parameters, and both render [an interactive panel](#the-crosspoint-panel-mcp-apps) where the host supports it, falling back to text where it does not.
-
-- **xpoint** — The `I1`/`O1` device family (UCX and similar)
-  - Reads `/V1/MEDIA/VIDEO/XP` and `/V1/MEDIA/VIDEO`, plus a per-destination `SWITCHABLE` read
-- **univ_xpoint** — Any supported family, detecting the dialect from what the device publishes
-  - Also handles TPN-MMU, whose ports are named after their stream (`41759AEC60DF_S0`, `2D66D972A0C8_D0`), routing lives in `SourceStream` rather than `ConnectedSource`, and names come from `StreamAlias`
+- **xpoint** — Takes no parameters. Renders [an interactive panel](#the-crosspoint-panel-mcp-apps) where the host supports it, falling back to text where it does not
+  - Reads `/V1/MEDIA/VIDEO/XP` plus a per-destination `SWITCHABLE` read, and detects the device family from what the crosspoint publishes
+  - Covers the `I1`/`O1` family and stream-named ones such as TPN-MMU, whose ports are named after their stream (`41759AEC60DF_S0`, `2D66D972A0C8_D0`), routing lives in `SourceStream` rather than `ConnectedSource`, and names come from `StreamAlias`
   - Detection keys on the **routing property**, not the port-name shape: the property is what the panel has to write, so a device with unfamiliar port names but recognised routing is still usable. An unrecognised device says so rather than returning an empty grid, which would read as a device with nothing routed
-  - `xpoint` is deliberately left alone rather than generalised — it is in use, and changing it would be a breaking change
 
 Switchability is read per destination and is not assumed uniform across them — a source `Busy` on one output can be `OK` on another, so nothing is cached, inferred, or predicted. A destination whose read fails is reported as unread rather than as refused, and one that publishes no `SWITCHABLE` data at all is treated as publishing *no restriction* rather than as refusing every source: some devices simply do not implement it, and blocking every cell would invent a rule the device never stated.
 
 ## The crosspoint panel (MCP Apps)
 
-`xpoint` and `univ_xpoint` return an interactive routing grid as well as text. Destinations
+`xpoint` returns an interactive routing grid as well as text. Destinations
 are rows, sources are columns, and clicking a cell switches it. Clicking the cell that is
 already routed disconnects that destination — there is no separate Disconnect column, so
 the action sits on the thing being undone. Port headers are tinted green or grey by
@@ -244,16 +239,12 @@ lw3-mcp/
 │   │   ├── tcp.js               # raw TCP socket, port 6107
 │   │   └── wss.js               # secure WebSocket fallback, wss://<host>/lw3
 │   ├── lightware-discovery.js   # mDNS device discovery
-│   ├── xpoint.js                # crosspoint grid model, I1/O1 family
-│   └── univ-xpoint.js           # crosspoint grid model, dialect-detecting
+│   └── xpoint.js                # crosspoint grid model, dialect-detecting
 ├── ui/
 │   ├── xpoint.src.html          # panel source; edit this one
-│   ├── univ-xpoint.src.html     # GENERATED from xpoint.src.html
-│   ├── xpoint.html              # GENERATED: source + SDK + grid model inlined
-│   └── univ-xpoint.html         # GENERATED
+│   └── xpoint.html              # GENERATED: source + SDK + grid model inlined
 ├── scripts/
-│   ├── derive-univ-panel.js     # univ-xpoint.src.html <- xpoint.src.html
-│   ├── build-panel.js           # inlines the MCP Apps SDK and grid models
+│   ├── build-panel.js           # inlines the MCP Apps SDK and the grid model
 │   ├── bundle.js                # npm run bundle
 │   └── verify-bundle.js         # unpack-and-run verification
 ├── tests/                       # node:test suites
@@ -264,11 +255,11 @@ lw3-mcp/
 └── CLAUDE.md                    # architecture notes for AI coding agents
 ```
 
-The four files marked GENERATED are build output — edit `ui/xpoint.src.html` and run
+The file marked GENERATED is build output — edit `ui/xpoint.src.html` and run
 `npm run build:panel`. The panel cannot import from the server's filesystem, so the grid
 model has to live inside the document; it used to be pasted there by hand, and it went
-stale exactly as the comment asking the next editor to keep it in step had feared. Tests
-compare the built panels against their sources byte for byte and fail if either drifts.
+stale exactly as the comment asking the next editor to keep it in step had feared. A test asserts the built panel still carries the behaviour of its source, so a stale build
+fails rather than shipping.
 
 Design and implementation notes for the packaging work live in `docs/superpowers/`.
 

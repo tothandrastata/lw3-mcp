@@ -1,8 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { buildGrid, cellState, renderGridText, XP_NODE, VIDEO_NODE } from '../src/xpoint.js';
-import { buildUniversalGrid, detectDialect, renderUniversalGridText } from '../src/univ-xpoint.js';
+import { buildGrid, cellState, detectDialect, renderGridText, XP_NODE } from '../src/xpoint.js';
 
 // Captured verbatim from a UCX-4x2-HC30 on 2026-08-28.
 const xpLines = [
@@ -18,17 +17,19 @@ const xpLines = [
   'n- /V1/MEDIA/VIDEO/XP/O2/SWITCHABLE',
 ];
 
-const videoLines = [
-  'pw /V1/MEDIA/VIDEO/I1.Name=USB-C in 1',
-  'pr /V1/MEDIA/VIDEO/I1.SignalPresent=false',
-  'pw /V1/MEDIA/VIDEO/I2.Name=USB-C in 2',
-  'pw /V1/MEDIA/VIDEO/I3.Name=HDMI in 3',
-  'pw /V1/MEDIA/VIDEO/I4.Name=HDMI in 4',
-  'pw /V1/MEDIA/VIDEO/I5.Name=Welcome Screen',
-  'pr /V1/MEDIA/VIDEO/I5.SignalPresent=true',
-  'pw /V1/MEDIA/VIDEO/O1.Name=HDMI out 1',
-  'pr /V1/MEDIA/VIDEO/O1.SignalPresent=false',
-  'pw /V1/MEDIA/VIDEO/O2.Name=HDMI out 2',
+// Port names and signal, from the same device. The model reads every port
+// from the XP node, so these sit alongside the routing lines above.
+const portLines = [
+  'pw /V1/MEDIA/VIDEO/XP/I1.Name=USB-C in 1',
+  'pr /V1/MEDIA/VIDEO/XP/I1.SignalPresent=false',
+  'pw /V1/MEDIA/VIDEO/XP/I2.Name=USB-C in 2',
+  'pw /V1/MEDIA/VIDEO/XP/I3.Name=HDMI in 3',
+  'pw /V1/MEDIA/VIDEO/XP/I4.Name=HDMI in 4',
+  'pw /V1/MEDIA/VIDEO/XP/I5.Name=Welcome Screen',
+  'pr /V1/MEDIA/VIDEO/XP/I5.SignalPresent=true',
+  'pw /V1/MEDIA/VIDEO/XP/O1.Name=HDMI out 1',
+  'pr /V1/MEDIA/VIDEO/XP/O1.SignalPresent=false',
+  'pw /V1/MEDIA/VIDEO/XP/O2.Name=HDMI out 2',
 ];
 
 // Not a verbatim capture, unlike the arrays above: transcribed from ten
@@ -50,11 +51,10 @@ const switchableLines = [
   'pr /V1/MEDIA/VIDEO/XP/O2/SWITCHABLE.I5=OK',
 ];
 
-const grid = () => buildGrid({ xpLines, videoLines, switchableLines });
+const grid = () => buildGrid({ xpLines: [...xpLines, ...portLines], switchableLines });
 
 test('the node paths are the video crosspoint', () => {
   assert.equal(XP_NODE, '/V1/MEDIA/VIDEO/XP');
-  assert.equal(VIDEO_NODE, '/V1/MEDIA/VIDEO');
 });
 
 test('sources lead with Disconnect, then inputs in numeric order', () => {
@@ -63,8 +63,10 @@ test('sources lead with Disconnect, then inputs in numeric order', () => {
 });
 
 test('inputs beyond nine sort numerically, not as text', () => {
-  const many = ['I2', 'I10', 'I1'].map((p) => `pw /V1/MEDIA/VIDEO/${p}.Name=in ${p}`);
-  const g = buildGrid({ xpLines: [], videoLines: many, switchableLines: [] });
+  // A routing property is what identifies the device family, so every fixture
+  // needs one before any port is recognised at all.
+  const many = ['I2', 'I10', 'I1'].map((p) => `pw /V1/MEDIA/VIDEO/XP/${p}.Name=in ${p}`);
+  const g = buildGrid({ xpLines: [...many, 'pw /V1/MEDIA/VIDEO/XP/O1.ConnectedSource=I1'], switchableLines: [] });
   assert.deepEqual(g.sources.map((s) => s.port), ['0', 'I1', 'I2', 'I10'],
     'string ordering would put I10 before I2');
 });
@@ -76,7 +78,10 @@ test('ports carry their human names on both axes', () => {
 });
 
 test('a port with no Name falls back to its port id', () => {
-  const g = buildGrid({ xpLines: [], videoLines: ['pr /V1/MEDIA/VIDEO/I7.SignalPresent=true'], switchableLines: [] });
+  const g = buildGrid({
+    xpLines: ['pr /V1/MEDIA/VIDEO/XP/I7.SignalPresent=true', 'pw /V1/MEDIA/VIDEO/XP/O1.ConnectedSource=I1'],
+    switchableLines: [],
+  });
   assert.equal(g.sources.find((s) => s.port === 'I7').name, 'I7');
 });
 
@@ -116,8 +121,13 @@ test('the same source is Busy on one destination and OK on another, per cellStat
 
 test('a known destination missing a source from its SWITCHABLE map reads Unavailable', () => {
   const g = buildGrid({
-    xpLines: ['pw /V1/MEDIA/VIDEO/XP/O1.Lock=false'],
-    videoLines: [],
+    // A routing property is what identifies the family; without one no port
+    // is recognised at all, so every fixture needs it.
+    xpLines: [
+      'pw /V1/MEDIA/VIDEO/XP/O1.Lock=false',
+      'pw /V1/MEDIA/VIDEO/XP/O1.ConnectedSource=I2',
+      'pw /V1/MEDIA/VIDEO/XP/I1.Name=in one',
+    ],
     switchableLines: ['pr /V1/MEDIA/VIDEO/XP/O1/SWITCHABLE.I2=OK'],
   });
   const c = cellState(g, 'O1', 'I1');
@@ -141,8 +151,10 @@ test('an OK cell is enabled with no reason', () => {
 });
 
 test('every cell of a locked destination is disabled', () => {
-  const locked = xpLines.map((l) => l.replace('O2.Lock=false', 'O2.Lock=true'));
-  const g = buildGrid({ xpLines: locked, videoLines, switchableLines });
+  // portLines too: names live on the XP node now, and the blocked list is
+  // asserted by destination name.
+  const locked = [...xpLines, ...portLines].map((l) => l.replace('O2.Lock=false', 'O2.Lock=true'));
+  const g = buildGrid({ xpLines: locked, switchableLines });
   assert.equal(cellState(g, 'O2', 'I2').enabled, false);
   assert.equal(cellState(g, 'O2', 'I2').reason, 'Locked');
   assert.equal(cellState(g, 'O1', 'I2').enabled, true, 'the other destination is unaffected');
@@ -165,16 +177,30 @@ test('the text rendering names every destination and its current source', () => 
   assert.match(text, /Busy/, 'unavailable sources are visible in text too');
 });
 
-test('an empty device yields an empty grid, not a crash', () => {
-  const g = buildGrid({ xpLines: [], videoLines: [], switchableLines: [] });
+test('a device that reports nothing is unrecognised, not empty', () => {
+  // Distinct claims: an empty grid says the device has no routing, while a
+  // null dialect says we could not tell what the device is. Reporting the
+  // first when the second is true is how an unsupported family looks like a
+  // working one with nothing plugged in.
+  const g = buildGrid({ xpLines: [], switchableLines: [] });
+  assert.equal(g.dialect, null);
   assert.deepEqual(g.destinations, []);
-  assert.deepEqual(g.sources, [{ port: '0', name: 'Disconnect', signalPresent: null }]);
+  assert.deepEqual(g.sources, []);
+  assert.match(renderGridText(g), /not recognised/);
 });
 
 test('a destination with no reported signal presence is not shown as "no signal"', () => {
-  // O2 never gets a /V1/MEDIA/VIDEO/O2.SignalPresent line in the fixture above -
-  // signalPresent stays null, meaning "never reported", not "reported false".
-  const g = grid();
+  // Its own fixture rather than the shared one: every destination there now
+  // reports a signal, and the distinction under test is between "never
+  // reported" and "reported false".
+  const g = buildGrid({
+    xpLines: [
+      'pw /V1/MEDIA/VIDEO/XP/O2.ConnectedSource=I5',
+      'pw /V1/MEDIA/VIDEO/XP/O2.Name=HDMI out 2',
+      'pw /V1/MEDIA/VIDEO/XP/I5.Name=Welcome Screen',
+    ],
+    switchableLines: [],
+  });
   assert.equal(g.destinations.find((d) => d.port === 'O2').signalPresent, null);
 
   const text = renderGridText(g);
@@ -203,11 +229,9 @@ test('a destination whose switchability could not be read at all is summarised o
     xpLines: [
       'pw /V1/MEDIA/VIDEO/XP/O1.Lock=false',
       'pw /V1/MEDIA/VIDEO/XP/O1.ConnectedSource=I2',
-    ],
-    videoLines: [
-      'pw /V1/MEDIA/VIDEO/I1.Name=Source One',
-      'pw /V1/MEDIA/VIDEO/I2.Name=Source Two',
-      'pw /V1/MEDIA/VIDEO/O1.Name=Output One',
+      'pw /V1/MEDIA/VIDEO/XP/I1.Name=Source One',
+      'pw /V1/MEDIA/VIDEO/XP/I2.Name=Source Two',
+      'pw /V1/MEDIA/VIDEO/XP/O1.Name=Output One',
     ],
     // Simulates a failed/absent SWITCHABLE read for O1: no entries at all.
     switchableLines: [],
@@ -225,8 +249,8 @@ test('a destination whose switchability could not be read at all is summarised o
 });
 
 test('a locked destination is reported once in the blocked list, not once per source', () => {
-  const locked = xpLines.map((l) => l.replace('O2.Lock=false', 'O2.Lock=true'));
-  const g = buildGrid({ xpLines: locked, videoLines, switchableLines });
+  const locked = [...xpLines, ...portLines].map((l) => l.replace('O2.Lock=false', 'O2.Lock=true'));
+  const g = buildGrid({ xpLines: locked, switchableLines });
   const text = renderGridText(g);
 
   const blockedSection = text.split('Not currently switchable:')[1] ?? '';
@@ -251,11 +275,9 @@ test('a destination that published no switchability is switchable, not blocked',
     xpLines: [
       'pw /V1/MEDIA/VIDEO/XP/O1.Lock=false',
       'pw /V1/MEDIA/VIDEO/XP/O1.ConnectedSource=I1',
-    ],
-    videoLines: [
-      'pw /V1/MEDIA/VIDEO/I1.Name=In One',
-      'pw /V1/MEDIA/VIDEO/I2.Name=In Two',
-      'pw /V1/MEDIA/VIDEO/O1.Name=Out One',
+      'pw /V1/MEDIA/VIDEO/XP/I1.Name=In One',
+      'pw /V1/MEDIA/VIDEO/XP/I2.Name=In Two',
+      'pw /V1/MEDIA/VIDEO/XP/O1.Name=Out One',
     ],
     switchableLines: [],
   });
@@ -278,11 +300,9 @@ test('a destination that published switchability still has absent sources blocke
     xpLines: [
       'pw /V1/MEDIA/VIDEO/XP/O1.Lock=false',
       'pw /V1/MEDIA/VIDEO/XP/O1.ConnectedSource=I1',
-    ],
-    videoLines: [
-      'pw /V1/MEDIA/VIDEO/I1.Name=In One',
-      'pw /V1/MEDIA/VIDEO/I2.Name=In Two',
-      'pw /V1/MEDIA/VIDEO/O1.Name=Out One',
+      'pw /V1/MEDIA/VIDEO/XP/I1.Name=In One',
+      'pw /V1/MEDIA/VIDEO/XP/I2.Name=In Two',
+      'pw /V1/MEDIA/VIDEO/XP/O1.Name=Out One',
     ],
     switchableLines: ['pr /V1/MEDIA/VIDEO/XP/O1/SWITCHABLE.I1=OK'],
   });
@@ -340,14 +360,14 @@ test('detects the stream-named family from SourceStream', () => {
 test('an unrecognised device is reported, not silently drawn as empty', () => {
   // An empty grid reads as "a device with nothing routed", which is a different
   // and much more misleading claim than "this device was not recognised".
-  const grid = buildUniversalGrid({ xpLines: ['pw /V1/MEDIA/VIDEO/XP/Q1.Whatever=x'] });
+  const grid = buildGrid({ xpLines: ['pw /V1/MEDIA/VIDEO/XP/Q1.Whatever=x'] });
   assert.equal(grid.dialect, null);
   assert.match(grid.reason, /no known routing property/);
-  assert.match(renderUniversalGridText(grid), /not recognised/);
+  assert.match(renderGridText(grid), /not recognised/);
 });
 
 test('the stream-named family is labelled by alias and routed by SourceStream', () => {
-  const grid = buildUniversalGrid({
+  const grid = buildGrid({
     xpLines: [
       'pr /V1/MEDIA/VIDEO/XP/2D66D972A0C8_D0.StreamAlias=RX3_D0',
       'pw /V1/MEDIA/VIDEO/XP/2D66D972A0C8_D0.SourceStream=41759AEC60DF_S0',
@@ -373,7 +393,7 @@ test('the stream-named family is labelled by alias and routed by SourceStream', 
 });
 
 test('the I1/O1 family keeps its Disconnect column', () => {
-  const grid = buildUniversalGrid({
+  const grid = buildGrid({
     xpLines: [
       'pw /V1/MEDIA/VIDEO/XP/O1.ConnectedSource=I1',
       'pw /V1/MEDIA/VIDEO/XP/O1.Lock=false',
@@ -386,8 +406,8 @@ test('the I1/O1 family keeps its Disconnect column', () => {
 });
 
 test('the built universal panel embeds src/univ-xpoint.js verbatim', () => {
-  const model = readFileSync(new URL('../src/univ-xpoint.js', import.meta.url), 'utf8');
-  const panel = readFileSync(new URL('../ui/univ-xpoint.html', import.meta.url), 'utf8');
+  const model = readFileSync(new URL('../src/xpoint.js', import.meta.url), 'utf8');
+  const panel = readFileSync(new URL('../ui/xpoint.html', import.meta.url), 'utf8');
   const bodyOf = (source, name) => {
     const at = source.indexOf(`function ${name}(`);
     assert.ok(at >= 0, `${name} not found`);
@@ -398,31 +418,26 @@ test('the built universal panel embeds src/univ-xpoint.js verbatim', () => {
     }
     throw new Error(`unbalanced ${name}`);
   };
-  for (const fn of ['buildUniversalGrid', 'cellState', 'detectDialect']) {
+  for (const fn of ['buildGrid', 'cellState', 'detectDialect']) {
     assert.equal(bodyOf(panel, fn), bodyOf(model, fn), `${fn} differs — run npm run build:panel`);
   }
 });
 
-test('the universal panel is a faithful derivation of the crosspoint panel', () => {
-  // ui/univ-xpoint.src.html is generated by scripts/derive-univ-panel.js. If it
-  // is edited by hand, or a derivation rule stops matching, the two panels drift
-  // and a fix made in one silently misses the other -- which is exactly how the
-  // grid model went stale earlier.
-  const derived = readFileSync(new URL('../ui/univ-xpoint.src.html', import.meta.url), 'utf8');
 
-  // Both must carry the behaviour that only exists in the source panel.
+test('the built panel carries the behaviour of its source', () => {
+  // ui/xpoint.html is generated: scripts/build-panel.js inlines the SDK and
+  // src/xpoint.js into ui/xpoint.src.html. A stale build would ship a panel
+  // that no longer matches the code under test here.
   const source = readFileSync(new URL('../ui/xpoint.src.html', import.meta.url), 'utf8');
-  for (const marker of [
-    's.port !== grid.disconnect',        // the hidden Disconnect column
-    'click to disconnect',               // the toggle
-    'connectSelf()',                     // device confirmed before writing
-    'askChatToSwitch',                   // the fallback
-  ]) {
-    assert.ok(source.includes(marker), `source panel lost: ${marker}`);
-    assert.ok(derived.includes(marker), `derived panel is stale, missing: ${marker}`);
-  }
+  const built = readFileSync(new URL('../ui/xpoint.html', import.meta.url), 'utf8');
 
-  // And the derivation must actually have happened.
-  assert.ok(derived.includes('buildUniversalGrid'), 'derived panel does not use the universal model');
-  assert.ok(!derived.includes('buildGrid({ xpLines, videoLines'), 'derived panel still calls the frozen model');
+  for (const marker of [
+    's.port !== grid.disconnect',   // the hidden Disconnect column
+    'click to disconnect',          // the toggle
+    'connectSelf()',                // device confirmed before writing
+    'askChatToSwitch',              // the fallback
+  ]) {
+    assert.ok(source.includes(marker), `panel source lost: ${marker}`);
+    assert.ok(built.includes(marker), `built panel is stale, missing: ${marker} — run npm run build:panel`);
+  }
 });

@@ -13,23 +13,19 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { LW3Protocol, parseGetAll } from './lw3-protocol.js';
 import { LightwareDiscovery } from './lightware-discovery.js';
-import { buildGrid, renderGridText, XP_NODE, VIDEO_NODE } from './xpoint.js';
-import { buildUniversalGrid, renderUniversalGridText } from './univ-xpoint.js';
+import { buildGrid, renderGridText, XP_NODE } from './xpoint.js';
 
 // The resource URI the xpoint tool points hosts at, and hosts fetch. Shared
 // between the ListResources/ReadResource handlers and the tool's own _meta so
 // there is exactly one string to keep in sync.
-// Deliberately NOT 'ui://lw3-mcp/xpoint'. That URI was first published by
-// 1.6.0, which had not yet declared the io.modelcontextprotocol/ui capability,
-// so the host saw it as an ordinary resource. It has never rendered since --
-// through eight releases, every change of content, size and result shape --
-// while every freshly named probe URI rendered on its first use. That pattern
-// is a host-side cache keyed by URI, and a new name is the only way past it.
-const XPOINT_UI = 'ui://lw3-mcp/xpoint-panel-v2';
-
-// The universal panel, served to univ_xpoint. A separate URI because a ui://
-// URI is cached by the host from its first use and cannot be repurposed.
-const UNIV_XPOINT_UI = 'ui://lw3-mcp/univ-xpoint-v1';
+//
+// The name no longer matches the tool, and stays anyway. A ui:// URI is cached
+// by the host from its first use: 'ui://lw3-mcp/xpoint' was published by 1.6.0
+// before the io.modelcontextprotocol/ui capability was declared, and never
+// rendered again through eight releases and a rewrite. This one is proven to
+// render with exactly this panel. Renaming it to read better would put that at
+// risk for no user-visible gain -- nobody outside this file ever sees it.
+const XPOINT_UI = 'ui://lw3-mcp/univ-xpoint-v1';
 
 
 /**
@@ -41,7 +37,7 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '1.12.1',
+        version: '2.0.0',
       },
       {
         capabilities: {
@@ -257,19 +253,9 @@ class LW3MCPServer {
           },
         },
         {
-          name: 'univ_xpoint',
-          description:
-            'Show the crosspoint of any supported device family, detecting the routing dialect from what the device publishes. Use this for TPN-MMU and other non-I1/O1 devices; xpoint remains for the I1/O1 family.',
-          inputSchema: {
-            type: 'object',
-            properties: {},
-          },
-          _meta: { ui: { resourceUri: UNIV_XPOINT_UI } },
-        },
-        {
           name: 'xpoint',
           description:
-            'Show the video crosspoint: which source is routed to each destination, and which sources each destination can switch to',
+            'Show the video crosspoint: which source is routed to each destination, and which sources each destination can switch to. Detects the device family from what the crosspoint publishes, so it covers I1/O1 devices and stream-named ones such as TPN-MMU.',
           inputSchema: {
             type: 'object',
             properties: {},
@@ -284,7 +270,6 @@ class LW3MCPServer {
     // startup, so the bundle's on-disk HTML is always what gets served.
     const uiDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui');
     const uiPath = join(uiDir, 'xpoint.html');
-    const univPath = join(uiDir, 'univ-xpoint.html');
 
     this.server.setRequestHandler(ListResourcesRequestSchema, async () => ({
       // Kept on one line: tests/manifest.test.js counts registered *tools* by
@@ -293,12 +278,11 @@ class LW3MCPServer {
       // miscounted as a 12th tool.
       resources: [
         { uri: XPOINT_UI, name: 'Crosspoint panel', mimeType: 'text/html;profile=mcp-app' },
-        { uri: UNIV_XPOINT_UI, name: 'Crosspoint panel (all families)', mimeType: 'text/html;profile=mcp-app' },
       ],
     }));
 
     this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-      const files = { [XPOINT_UI]: uiPath, [UNIV_XPOINT_UI]: univPath };
+      const files = { [XPOINT_UI]: uiPath };
       const file = files[request.params.uri];
       if (!file) {
         throw new Error(`Unknown resource: ${request.params.uri}`);
@@ -349,9 +333,6 @@ class LW3MCPServer {
 
           case 'discover':
             return await this.handleDiscover(args);
-
-          case 'univ_xpoint':
-            return await this.handleUniversalXpoint();
 
           case 'xpoint':
             return await this.handleXpoint();
@@ -655,7 +636,7 @@ class LW3MCPServer {
    * dialect from what the device publishes, so it works for TPN-MMU (ports
    * named after their stream, routing in SourceStream) as well.
    */
-  async handleUniversalXpoint() {
+  async handleXpoint() {
     this.ensureConnected();
 
     let xpLines;
@@ -671,7 +652,7 @@ class LW3MCPServer {
     // SWITCHABLE is a child node per destination, so which destinations exist
     // has to be settled first -- and that is dialect-dependent, which is why the
     // grid is built twice rather than the ports guessed from their names.
-    const provisional = buildUniversalGrid({ xpLines, switchableLines: [] });
+    const provisional = buildGrid({ xpLines, switchableLines: [] });
 
     const switchableLines = [];
     const switchableErrors = [];
@@ -681,96 +662,23 @@ class LW3MCPServer {
           ...(await this.lw3.sendCommand(`GETALL ${XP_NODE}/${destination.port}/SWITCHABLE`))
         );
       } catch (error) {
-        // A device without SWITCHABLE is normal, not a failure: buildUniversalGrid
+        // A device without SWITCHABLE is normal, not a failure: buildGrid
         // treats a destination that published none as unrestricted.
-        console.error(`[univ_xpoint] no SWITCHABLE for ${destination.port}:`, error.message);
+        console.error(`[xpoint] no SWITCHABLE for ${destination.port}:`, error.message);
         switchableErrors.push(`${destination.port}: ${error.message}`);
       }
     }
 
-    const grid = buildUniversalGrid({ xpLines, switchableLines });
+    const grid = buildGrid({ xpLines, switchableLines });
 
     const text = this.hostRendersApps()
       ? `Crosspoint panel opened (device family: ${grid.dialect || 'unrecognised'}). It shows ` +
         'the current routing, stays up to date, and switches when a cell is clicked. Do not ' +
         'restate the routing: it changes as the user clicks and any summary here goes stale.'
-      : renderUniversalGridText(grid);
-
-    return {
-      content: [{ type: 'text', text }],
-      structuredContent: { ...grid, connection: this.lw3.getConnectionInfo() },
-      _meta: { ui: { resourceUri: UNIV_XPOINT_UI } },
-    };
-  }
-
-  async handleXpoint() {
-    this.ensureConnected();
-
-    let xpLines;
-    try {
-      xpLines = await this.lw3.getAllDeep(XP_NODE);
-    } catch (error) {
-      throw new Error(
-        `Could not read the video crosspoint at ${XP_NODE} — ${error.message}. ` +
-          'This device may not have a video crosspoint, or may use a different node layout.'
-      );
-    }
-
-    const videoLines = await this.lw3.getAllDeep(VIDEO_NODE);
-
-    // SWITCHABLE is a child node per destination, so it needs one call each. A
-    // timeout or a missing SWITCHABLE child on one destination must not cost the
-    // caller the routing and port names already read successfully, so each read
-    // is caught individually — buildGrid treats a destination with no switchable
-    // data as unread (not as a device refusal), and renderGridText reports that
-    // honestly rather than as a wall of failed cells.
-    const destinations = [...new Set(
-      xpLines.map((l) => l.match(/\/XP\/(O\d+)[./]/)?.[1]).filter(Boolean)
-    )];
-    const switchableLines = [];
-    const switchableErrors = [];
-    for (const port of destinations) {
-      try {
-        switchableLines.push(...(await this.lw3.sendCommand(`GETALL ${XP_NODE}/${port}/SWITCHABLE`)));
-      } catch (error) {
-        console.error(`[xpoint] Could not read SWITCHABLE for ${port}:`, error.message);
-        switchableErrors.push(`${port}: ${error.message}`);
-      }
-    }
-
-    const grid = buildGrid({ xpLines, videoLines, switchableLines });
-
-    // The text rendering is the fallback for hosts that cannot draw the panel.
-    // Where the panel does draw, this text is a snapshot taken now while the
-    // panel goes on updating as the user clicks, so within a click or two the
-    // conversation is describing routing that is no longer current -- in more
-    // detail, and more confidently, than the panel it sits under. Say only what
-    // stays true and let the panel speak for the routing.
-    let text = this.hostRendersApps()
-      ? 'Video crosspoint panel opened. It shows the current routing, stays up to ' +
-        'date as it changes, and switches when a cell is clicked. Do not restate ' +
-        'the routing: it changes as the user clicks and any summary here goes stale.'
       : renderGridText(grid);
 
-    if (switchableErrors.length) {
-      text +=
-        `\n\nCould not read switchability for ${switchableErrors.length} destination(s) ` +
-        '(reported above as "could not be read"):\n' +
-        switchableErrors.map((e) => `  ${e}`).join('\n');
-    }
-
     return {
       content: [{ type: 'text', text }],
-      // The panel renders from this. It cannot fetch its own data: app-initiated
-      // tool calls do not reach the server instance holding the LW3 connection,
-      // so a panel that polled would show "Not connected" while the chat beside
-      // it was connected. The host hands this straight to the view.
-      //
-      // The address travels with it so the panel's own instance can open its
-      // own connection and perform switches directly. No password is included,
-      // and none should be: the panel runs in a sandboxed frame and an admin
-      // password does not belong there. A device that demands one simply falls
-      // back to asking the conversation.
       structuredContent: { ...grid, connection: this.lw3.getConnectionInfo() },
       _meta: { ui: { resourceUri: XPOINT_UI } },
     };

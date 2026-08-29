@@ -1,6 +1,17 @@
 /**
- * Turns LW3 GETALL output into a video crosspoint grid, and answers what state
- * each cell is in. Pure — no protocol, no sockets, no rendering beyond text.
+ * Dialect-aware video crosspoint model.
+ *
+ * src/xpoint.js models one device family: ports named I1/O1, routing in
+ * ConnectedSource, names in Name. The TPN-MMU family names its ports after the
+ * stream (41759AEC60DF_S0, 2D66D972A0C8_D0), routes with SourceStream and names
+ * with StreamAlias, so that model produces an empty grid for it.
+ *
+ * This is a separate module rather than a generalisation of src/xpoint.js
+ * because the `xpoint` tool is in use and must not change behaviour. The two
+ * will converge once this one has been exercised against real hardware.
+ *
+ * Nothing here talks to a device. It turns GETALL reply lines into a grid, and
+ * decides what each cell means.
  */
 
 export const XP_NODE = '/V1/MEDIA/VIDEO/XP';
@@ -15,71 +26,143 @@ function parseProperty(line) {
   return match ? { path: match[1], prop: match[2], value: match[3] } : null;
 }
 
-/** Inputs and outputs sort by their number, so I10 follows I2 rather than I1. */
-function byPortNumber(a, b) {
-  return Number(a.slice(1)) - Number(b.slice(1));
-}
+/**
+ * How a device family identifies its ports and states its routing.
+ *
+ * `disconnect` is the value that clears a destination, or null where no such
+ * value is known. Offering a Disconnect control whose value we are guessing is
+ * worse than not offering one: on real hardware a wrong token could be accepted
+ * as a stream name and route something unintended.
+ */
+export const DIALECTS = {
+  ucx: {
+    id: 'ucx',
+    describe: 'I1/O1 ports, ConnectedSource routing',
+    isSource: (port) => /^I\d+$/.test(port),
+    isDestination: (port) => /^O\d+$/.test(port),
+    routeProp: 'ConnectedSource',
+    nameProp: 'Name',
+    lockProp: 'Lock',
+    disconnect: '0',
+    sortKey: (port) => Number(port.slice(1)),
+  },
+  tpn: {
+    id: 'tpn',
+    describe: 'stream-named ports (…_S0 / …_D0), SourceStream routing',
+    isSource: (port) => /_S\d+$/.test(port),
+    isDestination: (port) => /_D\d+$/.test(port),
+    routeProp: 'SourceStream',
+    nameProp: 'StreamAlias',
+    lockProp: null,
+    // Confirmed against real hardware. The emulator could not settle it: it
+    // accepts anything at all, '0', '' and 'none' alike.
+    disconnect: '0',
+    sortKey: null,
+  },
+};
 
-export function buildGrid({ xpLines = [], videoLines = [], switchableLines = [] }) {
-  const ports = new Map(); // port -> { name, signalPresent }
-  const dest = new Map(); // port -> { connectedSource, locked }
-  const switchable = {};
-
-  // /V1/MEDIA/VIDEO/<port>.Name and .SignalPresent
-  for (const line of videoLines) {
+/**
+ * Work out which family a device belongs to from what it published.
+ *
+ * Deliberately keyed on the routing property rather than on port-name shape:
+ * the property is what the panel has to write, so a device whose ports look
+ * unfamiliar but whose routing is recognised is still usable, while one whose
+ * routing we cannot write is not -- however its ports are named.
+ *
+ * @returns {{dialect: object|null, reason: string}}
+ */
+export function detectDialect(xpLines) {
+  const props = new Set();
+  for (const line of xpLines) {
     const p = parseProperty(line);
-    if (!p) continue;
-    const port = p.path.startsWith(`${VIDEO_NODE}/`) ? p.path.slice(VIDEO_NODE.length + 1) : null;
-    if (!port || !/^[IO]\d+$/.test(port)) continue;
-    const entry = ports.get(port) || { name: null, signalPresent: null };
-    if (p.prop === 'Name') entry.name = p.value;
-    if (p.prop === 'SignalPresent') entry.signalPresent = asBool(p.value);
-    ports.set(port, entry);
+    if (p) props.add(p.prop);
   }
 
-  // /V1/MEDIA/VIDEO/XP/<out>.ConnectedSource and .Lock
+  for (const dialect of [DIALECTS.ucx, DIALECTS.tpn]) {
+    if (props.has(dialect.routeProp)) return { dialect, reason: `matched on ${dialect.routeProp}` };
+  }
+
+  return {
+    dialect: null,
+    reason: props.size
+      ? `no known routing property among: ${[...props].sort().join(', ')}`
+      : 'the crosspoint reported no properties at all',
+  };
+}
+
+/**
+ * Build the grid.
+ *
+ * Ports come from the XP node here, unlike src/xpoint.js which reads names from
+ * /V1/MEDIA/VIDEO. TPN publishes StreamAlias on both, and reading one node
+ * rather than two halves the round trips.
+ */
+export function buildGrid({ xpLines = [], switchableLines = [] }) {
+  const { dialect, reason } = detectDialect(xpLines);
+  if (!dialect) return { dialect: null, reason, sources: [], destinations: [], switchable: {} };
+
+  const ports = new Map(); // port -> { name, signalPresent, route, locked }
+
   for (const line of xpLines) {
     const p = parseProperty(line);
     if (!p) continue;
-    const port = p.path.startsWith(`${XP_NODE}/`) ? p.path.slice(XP_NODE.length + 1) : null;
-    if (!port || !/^O\d+$/.test(port)) continue;
-    const entry = dest.get(port) || { connectedSource: null, locked: false };
-    if (p.prop === 'ConnectedSource') entry.connectedSource = p.value;
-    if (p.prop === 'Lock') entry.locked = asBool(p.value);
-    dest.set(port, entry);
+    if (!p.path.startsWith(`${XP_NODE}/`)) continue;
+    const port = p.path.slice(XP_NODE.length + 1);
+    if (port.includes('/')) continue; // a child node such as SWITCHABLE
+
+    const entry = ports.get(port) || { name: null, signalPresent: null, route: null, locked: false };
+    if (p.prop === dialect.nameProp) entry.name = p.value;
+    if (p.prop === 'SignalPresent') entry.signalPresent = asBool(p.value);
+    if (p.prop === dialect.routeProp) entry.route = p.value;
+    if (dialect.lockProp && p.prop === dialect.lockProp) entry.locked = asBool(p.value);
+    ports.set(port, entry);
   }
 
-  // /V1/MEDIA/VIDEO/XP/<out>/SWITCHABLE.<src>=OK|Busy|...
+  const switchable = {};
   for (const line of switchableLines) {
     const p = parseProperty(line);
     if (!p) continue;
-    const match = p.path.match(/\/XP\/(O\d+)\/SWITCHABLE$/);
+    const match = p.path.match(/\/XP\/(.+)\/SWITCHABLE$/);
     if (!match) continue;
     switchable[match[1]] = switchable[match[1]] || {};
     switchable[match[1]][p.prop] = p.value;
   }
 
-  const named = (port) => ({
+  const order = (a, b) => {
+    if (dialect.sortKey) return dialect.sortKey(a) - dialect.sortKey(b);
+    // Alias order where the device gave names, port order otherwise: RX3_D0
+    // reads better than 511A0DAA865F_D0 and groups the way an operator expects.
+    const an = ports.get(a)?.name || a;
+    const bn = ports.get(b)?.name || b;
+    return an.localeCompare(bn, undefined, { numeric: true });
+  };
+
+  const describe = (port) => ({
     port,
     name: ports.get(port)?.name || port,
     signalPresent: ports.get(port)?.signalPresent ?? null,
   });
 
-  const inputs = [...ports.keys()].filter((p) => p.startsWith('I')).sort(byPortNumber);
-  // Every destination the device mentioned, whether via VIDEO or XP.
-  const outputs = [...new Set([...[...ports.keys()].filter((p) => p.startsWith('O')), ...dest.keys()])]
-    .sort(byPortNumber);
+  const sourcePorts = [...ports.keys()].filter(dialect.isSource).sort(order);
+  const destPorts = [...ports.keys()].filter(dialect.isDestination).sort(order);
+
+  // Only where the token is known. See DIALECTS.tpn.disconnect.
+  const disconnectColumn = dialect.disconnect === null
+    ? []
+    : [{ port: dialect.disconnect, name: 'Disconnect', signalPresent: null }];
 
   return {
-    // '0' is the device's own token for "disconnect this destination".
-    // It stays in sources for the text rendering; the panel hides that column
-    // and sends this value when a routed cell is clicked.
-    disconnect: '0',
-    sources: [{ port: '0', name: 'Disconnect', signalPresent: null }, ...inputs.map(named)],
-    destinations: outputs.map((port) => ({
-      ...named(port),
-      connectedSource: dest.get(port)?.connectedSource ?? null,
-      locked: dest.get(port)?.locked ?? false,
+    dialect: dialect.id,
+    reason,
+    routeProp: dialect.routeProp,
+    // The view needs it: clicking a routed cell disconnects that destination,
+    // so the panel writes this value rather than a source port.
+    disconnect: dialect.disconnect,
+    sources: [...disconnectColumn, ...sourcePorts.map(describe)],
+    destinations: destPorts.map((port) => ({
+      ...describe(port),
+      connectedSource: ports.get(port)?.route ?? null,
+      locked: ports.get(port)?.locked ?? false,
     })),
     switchable,
   };
@@ -88,27 +171,18 @@ export function buildGrid({ xpLines = [], videoLines = [], switchableLines = [] 
 /**
  * What the view should draw for one cell.
  *
- * A cell is disabled when the destination is locked, or when the device does not
- * report the source as OK for it. Absence of information counts as disabled:
- * offering a click the device will refuse is worse than withholding one.
+ * Same rules as src/xpoint.js: a destination that published no switchability at
+ * all is switchable (the device stated no restriction, so none is invented);
+ * one that published it without mentioning a source is not.
  */
 export function cellState(grid, destPort, srcPort) {
   const destination = grid.destinations.find((d) => d.port === destPort);
-  const selected = destination?.connectedSource === srcPort;
-
   if (!destination) return { selected: false, enabled: false, reason: 'Unknown destination' };
+
+  const selected = destination.connectedSource === srcPort;
   if (destination.locked) return { selected, enabled: false, reason: 'Locked' };
 
   const published = grid.switchable[destPort];
-
-  // No SWITCHABLE data for this destination at all -- the node was unreadable, or
-  // the device does not implement it (the Taurus emulator does not). That is not
-  // the device refusing a switch, it is the device publishing no restrictions, so
-  // blocking every source would invent a rule rather than honour one. A switch the
-  // device will not accept still fails visibly at the SET.
-  //
-  // Distinct from a destination that DID publish switchability without mentioning
-  // this source: there the device has spoken, and we honour it.
   if (published === undefined) return { selected, enabled: true, reason: null };
 
   const status = published[srcPort];
@@ -120,7 +194,10 @@ export function cellState(grid, destPort, srcPort) {
 
 /** The same grid as text, for hosts that cannot render the panel. */
 export function renderGridText(grid) {
-  if (grid.destinations.length === 0) return 'No video crosspoint destinations were reported.';
+  if (!grid.dialect) return `This device's crosspoint was not recognised: ${grid.reason}.`;
+  if (grid.destinations.length === 0) {
+    return `No crosspoint destinations were reported (device family: ${grid.dialect}).`;
+  }
 
   const lines = grid.destinations.map((d) => {
     const source = grid.sources.find((s) => s.port === d.connectedSource);
@@ -172,7 +249,7 @@ export function renderGridText(grid) {
     }
   }
 
-  const sections = ['Current routing:', ...lines];
+  const sections = [`Current routing (device family: ${grid.dialect}):`, ...lines];
 
   if (canSwitch.length) sections.push('', 'Can switch to:', ...canSwitch);
   if (blocked.length) sections.push('', 'Not currently switchable:', ...blocked);

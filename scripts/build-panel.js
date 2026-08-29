@@ -27,11 +27,6 @@ const PANELS = [
     out: join(ROOT, 'ui/xpoint.html'),
     model: join(ROOT, 'src/xpoint.js'),
   },
-  {
-    src: join(ROOT, 'ui/univ-xpoint.src.html'),
-    out: join(ROOT, 'ui/univ-xpoint.html'),
-    model: join(ROOT, 'src/univ-xpoint.js'),
-  },
 ];
 const PLACEHOLDER = '/* __MCP_APPS_SDK__ */';
 const MODEL_PLACEHOLDER = '/* __XPOINT_MODEL__ */';
@@ -76,8 +71,7 @@ const inlined = [
 // of this very document into the middle of the script. A replacer function is
 // handed the text verbatim.
 for (const { src: srcPath, out, model } of PANELS) {
-  // LF-normalised for the same reason as derive-univ-panel.js: a CRLF checkout
-  // must not change what gets inlined.
+  // LF-normalised: a CRLF checkout must not change what gets inlined.
   const src = readFileSync(srcPath, 'utf8').replace(/\r\n/g, '\n');
   if (!src.includes(PLACEHOLDER)) {
     throw new Error(`${srcPath} is missing the ${PLACEHOLDER} marker`);

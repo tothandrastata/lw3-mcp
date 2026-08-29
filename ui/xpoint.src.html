@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Video crosspoint</title>
+<title>Crosspoint</title>
 <style>
   /*
    * Self-contained styling only: no @import, no external fonts, no url()
@@ -228,7 +228,7 @@
 <div id="app">
   <div id="stage" hidden></div>
   <header class="panel-header">
-    <h1>Video crosspoint</h1>
+    <h1>Crosspoint</h1>
     <div id="status" class="status" aria-live="polite"></div>
   </header>
   <div id="banner" class="banner" role="alert" hidden></div>
@@ -238,7 +238,7 @@
     <button type="submit">Connect and switch</button>
   </form>
   <div class="table-wrap">
-    <table id="grid" aria-label="Video crosspoint routing"></table>
+    <table id="grid" aria-label="Crosspoint routing"></table>
   </div>
 </div>
 <script type="module">
@@ -387,17 +387,12 @@ function linesFromGetAll(jsonText) {
 
 async function fetchGrid() {
   const xpLines = linesFromGetAll(await callTool('GETALL', { path: `${XP_NODE}/*` }));
-  const videoLines = linesFromGetAll(await callTool('GETALL', { path: `${VIDEO_NODE}/*` }));
 
-  // Same pattern src/index.js uses to enumerate destinations before
-  // reading each one's SWITCHABLE child: derived from what XP actually
-  // reported, not assumed from VIDEO or hardcoded.
-  const destinations = [...new Set(
-    xpLines.map((l) => {
-      const m = l.match(/\/XP\/(O\d+)[./]/);
-      return m ? m[1] : null;
-    }).filter(Boolean)
-  )];
+  // Which ports are destinations depends on the device family, so the model
+  // decides it. A port-name pattern here would fit one family only, which is
+  // the whole reason this panel exists.
+  const first = buildGrid({ xpLines, switchableLines: [] });
+  const destinations = first.destinations.map((d) => d.port);
 
   const switchableLines = [];
   for (const port of destinations) {
@@ -413,7 +408,7 @@ async function fetchGrid() {
     }
   }
 
-  return buildGrid({ xpLines, videoLines, switchableLines });
+  return buildGrid({ xpLines, switchableLines });
 }
 
 // ---------------------------------------------------------------------
@@ -484,9 +479,16 @@ function setStatus(text) {
 }
 
 function render(grid) {
+  if (grid && grid.dialect === null) {
+    // Better to say the device was not recognised than to draw an empty grid,
+    // which reads as a device with nothing routed.
+    gridEl.innerHTML = '';
+    setBanner(`This device's crosspoint was not recognised: ${grid.reason}`, { stale: false });
+    return;
+  }
   if (!grid || grid.destinations.length === 0) {
     gridEl.innerHTML = '';
-    setBanner('No video crosspoint destinations were reported.', { stale: false });
+    setBanner('No crosspoint destinations were reported.', { stale: false });
     return;
   }
 
@@ -657,7 +659,9 @@ async function switchRoute(destPort, srcPort) {
 
     await callTool('SET', {
       nodepath: `${XP_NODE}/${destPort}`,
-      property: 'ConnectedSource',
+      // ConnectedSource on one family, SourceStream on another. The grid says
+      // which, so nothing here has to know the device.
+      property: (lastGrid && lastGrid.routeProp) || 'ConnectedSource',
       value: srcPort,
     });
     // A switch can change which sources are Busy at *other* destinations (two
@@ -689,7 +693,7 @@ async function askChatToSwitch(destPort, srcPort, destLabel, srcLabel, cause) {
           // Port codes as well as names: the model needs the exact SET values,
           // and the names alone are ambiguous.
           text:
-            `Set ${XP_NODE}/${destPort}.ConnectedSource to ${srcPort} ` +
+            `Set ${XP_NODE}/${destPort}.${(lastGrid && lastGrid.routeProp) || 'ConnectedSource'} to ${srcPort} ` +
             `(switch ${destLabel} to ${srcLabel}), then run xpoint to show the result.`,
         },
       ],

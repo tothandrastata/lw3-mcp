@@ -127,46 +127,33 @@ marked every cell `Unavailable` while every test passed, because the tests only 
 exercised the module. `tests/xpoint.test.js` now compares the built panel's `buildGrid`,
 `cellState` and `renderGridText` against the module byte for byte.
 
-## Two crosspoint tools
+## One crosspoint tool, several device families
 
-`xpoint` serves the I1/O1 family and is **frozen**: it is in use, and changing its
-behaviour is a breaking change. `univ_xpoint` ([src/univ-xpoint.js](src/univ-xpoint.js))
-detects the device family from what the crosspoint publishes and serves both.
+`xpoint` ([src/xpoint.js](src/xpoint.js)) detects the device family from what the
+crosspoint publishes. There used to be two tools -- an I1/O1 one and a dialect-aware
+`univ_xpoint` -- kept apart to avoid a breaking change; they were merged in 2.0.0 and
+`univ_xpoint` is gone.
 
-| | `xpoint` | `univ_xpoint` |
+| | I1/O1 family | stream-named family |
 |---|---|---|
-| Ports | `I1` / `O1` | plus `…_S0` / `…_D0` |
-| Routing property | `ConnectedSource` | that, or `SourceStream` |
-| Names | `Name` on `/V1/MEDIA/VIDEO/<port>` | `Name` or `StreamAlias`, read from the XP node |
-| Disconnect | `0` | `0` (both families) |
+| Ports | `I1` / `O1` | `…_S0` / `…_D0` |
+| Routing property | `ConnectedSource` | `SourceStream` |
+| Names | `Name` | `StreamAlias` |
+| Disconnect | `0` | `0` |
 
-**Neither panel shows a Disconnect column.** Clicking the cell that is already routed
-disconnects that destination: one fewer column, and the action sits on the thing being
-undone. The token still appears in each model's `sources` for the text rendering, and in
+Detection keys on the **routing property**, not port-name shape: the property is what
+the panel has to write, so a device with unfamiliar port names but recognised routing is
+still usable. An unrecognised device reports that fact; it must never render as an empty
+grid, which reads as "a device with nothing routed". Adding a family means an entry in
+`DIALECTS` and nothing else.
+
+Ports are read from the XP node alone. The older model also swept `/V1/MEDIA/VIDEO` for
+names; the stream-named family publishes them on both, so one sweep does.
+
+**Neither axis shows a Disconnect column.** Clicking the cell that is already routed
+disconnects that destination. The token stays in `sources` for the text rendering and in
 `grid.disconnect` for the panel, which filters that column out and sends the value when a
 routed cell is clicked.
-
-`ui/univ-xpoint.src.html` is **generated** from `ui/xpoint.src.html` by
-`scripts/derive-univ-panel.js`. Edit the crosspoint panel; the universal one follows. A
-derivation rule that stops matching fails the build rather than silently leaving the two
-to drift, and a test asserts the derived panel still carries the behaviour.
-
-Detection keys on the **routing property**, not on port-name shape: the property is what
-the panel has to write, so a device with unfamiliar port names but recognised routing is
-still usable. An unrecognised device says so rather than drawing an empty grid, which
-would read as "a device with nothing routed".
-
-The TPN disconnect token is `0`, confirmed against real hardware. It could not be
-established from the emulator, which accepts any value at all — `0`, empty and `none`
-alike.
-
-The diagnostic probe panels have been removed now that the panel works. If a host ever
-needs checking again, `probe-panel.html` in the `building-mcp-apps` skill is the same
-thing, ready to drop back in.
-
-Text content is sent only to hosts that cannot render (`hostRendersApps()`), because
-beside a live panel a text rendering is a snapshot that goes stale on the first click —
-and reads as more authoritative than the panel, being more detailed.
 
 ## Device dialects: the `/*` wildcard
 
