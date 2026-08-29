@@ -46,7 +46,7 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '1.7.10',
+        version: '1.8.0',
       },
       {
         capabilities: {
@@ -744,7 +744,13 @@ class LW3MCPServer {
       // tool calls do not reach the server instance holding the LW3 connection,
       // so a panel that polled would show "Not connected" while the chat beside
       // it was connected. The host hands this straight to the view.
-      structuredContent: grid,
+      //
+      // The address travels with it so the panel's own instance can open its
+      // own connection and perform switches directly. No password is included,
+      // and none should be: the panel runs in a sandboxed frame and an admin
+      // password does not belong there. A device that demands one simply falls
+      // back to asking the conversation.
+      structuredContent: { ...grid, connection: this.lw3.getConnectionInfo() },
       _meta: { ui: { resourceUri: XPOINT_UI } },
     };
   }

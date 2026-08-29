@@ -347,6 +347,7 @@ app.ontoolresult = (result) => {
   try {
     const grid = result && result.structuredContent;
     if (!grid || !grid.destinations || !grid.sources) return;
+    if (grid.connection) connection = grid.connection;
     lastGrid = grid;
     hydrated = true;
     render(grid);
@@ -498,6 +499,10 @@ const appEl = document.getElementById('app');
 
 let lastGrid = null;
 let hydrated = false;
+// Where the chat's instance found the device. Used to give this panel's own
+// instance a connection so clicks can switch directly.
+let connection = null;
+let selfConnected = false;
 let busy = false;
 let polling = false;
 
@@ -565,6 +570,27 @@ function labelFor(list, port) {
 }
 
 /**
+ * Give this panel's own server instance a device connection.
+ *
+ * App-initiated tool calls land in a different instance than the chat's, and
+ * that one has never connected to anything. Rather than route every switch
+ * through the conversation, it connects itself using the address that came
+ * with the grid.
+ *
+ * No password is passed, and none is available here by design: the panel runs
+ * in a sandboxed frame and an admin password does not belong in it. A device
+ * that requires one leaves this failing, and the caller falls back to asking
+ * the conversation to switch.
+ */
+async function connectSelf() {
+  if (selfConnected) return true;
+  if (!connection || !connection.host) return false;
+  await callTool('connect', { host: connection.host, port: connection.port });
+  selfConnected = true;
+  return true;
+}
+
+/**
  * Switch a destination to a source.
  *
  * The direct SET is tried first, so this needs no changing if a host ever
@@ -581,7 +607,7 @@ async function switchRoute(destPort, srcPort) {
   const destLabel = labelFor(lastGrid && lastGrid.destinations, destPort);
   const srcLabel = srcPort === '0' ? 'Disconnect' : labelFor(lastGrid && lastGrid.sources, srcPort);
 
-  try {
+  const applySwitch = async () => {
     await callTool('SET', {
       nodepath: `${XP_NODE}/${destPort}`,
       property: 'ConnectedSource',
@@ -591,7 +617,28 @@ async function switchRoute(destPort, srcPort) {
     // (e.g. two outputs sharing one input on the crosspoint chip), so the
     // refresh after a switch must re-read SWITCHABLE, not just routing.
     await refresh();
-    setStatus(`Switched ${destLabel} to ${srcLabel}`);
+    setStatus(`Switched ${destLabel} → ${srcLabel}`);
+  };
+
+  try {
+    setStatus(`Switching ${destLabel} → ${srcLabel}…`);
+    try {
+      await applySwitch();
+    } catch (firstError) {
+      // Usually this instance having no connection of its own. But a switch can
+      // also fail because the destination is locked or the source is Busy, and
+      // connecting would not help that -- so if opening a connection is not
+      // possible, report what actually went wrong rather than the connect
+      // failure that followed it.
+      let opened = false;
+      try {
+        opened = await connectSelf();
+      } catch (connectError) {
+        opened = false;
+      }
+      if (!opened) throw firstError;
+      await applySwitch();
+    }
   } catch (directError) {
     setStatus(`Asking Claude to switch ${destLabel}…`);
     try {
