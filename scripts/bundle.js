@@ -44,8 +44,7 @@ const { toolCount } = await verifyBundle(outFile);
 // Step 2 pruned devDependencies, which leaves the tree unable to run
 // build:panel (it inlines the ext-apps SDK from node_modules). Put them back
 // so the repo still works after a bundle.
-console.log('
-[6/6] Restoring dev dependencies');
+console.log('\n[6/6] Restoring dev dependencies');
 run(npm, ['install', '--no-audit', '--no-fund']);
 
 const mb = (statSync(outFile).size / 1024 / 1024).toFixed(1);
