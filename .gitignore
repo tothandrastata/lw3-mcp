@@ -8,3 +8,7 @@ dist/
 # deliverable and is tracked; the 34 MB HTML export is not.
 /*.html
 !/WALKTHROUGH.pdf
+
+# Local copy of the building-mcp-apps skill, for sharing. The skill itself
+# lives in ~/.claude/skills/ and is not part of this package.
+/building-mcp-apps.zip

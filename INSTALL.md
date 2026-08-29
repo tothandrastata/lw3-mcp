@@ -51,7 +51,10 @@ Ask Claude:
   IP address is the safer bet if that happens.
 - *"Show me the root structure"* — dumps the device tree.
 - *"Read /V1/MANAGEMENT/NETWORK.HostName"*
-- *"Show me the video crosspoint"* — which source is routed to each output, and what each output can switch to.
+- *"Show me the video crosspoint"* — which source is routed to each output, and what each
+  output can switch to. Claude Desktop draws this as a clickable grid: click a cell to
+  switch that output, or click the cell that is already highlighted to disconnect it.
+  Green headers mean a signal is present on that port.
 
 The connection stays open for the whole Claude Desktop session. Only one device
 at a time; ask Claude to disconnect before connecting to another.

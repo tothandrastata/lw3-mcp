@@ -2,6 +2,8 @@
 
 An MCP (Model Context Protocol) server that acts as a gateway to Lightware devices over the LW3 protocol. It discovers devices on the local network and holds one persistent connection for the length of an MCP session.
 
+In a host that supports [MCP Apps](#the-crosspoint-panel-mcp-apps), the crosspoint tools render an interactive routing grid rather than text — click a cell to switch.
+
 Ships two ways: as an installable bundle for people who just want the tools, and as a normal Node project for people working on it.
 
 ## Install the bundle (most people)
@@ -22,7 +24,8 @@ One requirement worth repeating here: **the machine must be on the same network 
 npm install
 npm start          # run the server on stdio
 npm run dev        # same, with --watch
-npm test           # 113 tests, node:test, no test framework needed
+npm test           # 128 tests, node:test, no test framework needed
+npm run build:panel # regenerate the UI panels (also run by bundle)
 npm run bundle     # build the distributable .mcpb
 ```
 
@@ -51,13 +54,17 @@ npx @modelcontextprotocol/inspector node src/index.js
 npm run bundle
 ```
 
-Produces `dist/lw3-mcp-<version>.mcpb`, roughly 2.5 MB, with the version read from `package.json` so the filename cannot drift from the contents. The build runs five steps and refuses to report success unless all of them pass:
+Produces `dist/lw3-mcp-<version>.mcpb`, roughly 3.3 MB, with the version read from `package.json` so the filename cannot drift from the contents. Two generation steps run first, then six build steps, and it refuses to report success unless all of them pass:
+
+- `derive-univ-panel` — regenerates `ui/univ-xpoint.src.html` from `ui/xpoint.src.html`
+- `build-panel` — inlines the MCP Apps SDK and the grid models into both panels
 
 1. `npm test` — catches manifest drift before anything is packed
 2. `npm ci --omit=dev` — reinstalls from the lockfile so the build is reproducible
 3. `mcpb validate` — checks `manifest.json` against the real schema
 4. `mcpb pack` — zips the repo plus its dependencies
-5. **Verify** — unpacks the result, confirms the dependencies are inside, and starts the packed server to confirm it answers `tools/list`
+5. **Verify** — unpacks the result, confirms the dependencies and panels are inside, and starts the packed server to confirm it answers `tools/list`
+6. Restores dev dependencies, which step 2 pruned — without this the tree cannot rebuild its own panels
 
 Step 5 exists because the interesting failures here are silent. A bundle missing `node_modules` installs without complaint and dies on first launch; a stale `manifest.json` version makes Claude Desktop display a version that disagrees with the filename. The verifier reads the *packed* manifest — not your working tree — so it validates the artifact that actually ships.
 
@@ -73,7 +80,10 @@ Distribution is GitHub Releases. To cut a new one:
 
 1. Bump the version in `package.json` **and** `manifest.json`, then `npm run bundle`
 2. Copy the output to a version-less name as well: `cp dist/lw3-mcp-<version>.mcpb dist/lw3-mcp.mcpb`
-3. Draft a release at [releases/new](https://github.com/tothandrastata/lw3-mcp/releases/new), tag it `v<version>`, and attach both files
+3. Draft a release at [releases/new](https://github.com/tothandrastata/lw3-mcp/releases/new), tag it `v<version>` **on the commit that carries that version**, and attach both files
+
+Check the tag actually points where you think: a release created against a branch name tags
+whatever that branch currently is, which is not necessarily the build you just made.
 
 Attaching the version-less copy is what keeps this URL working forever:
 
@@ -93,7 +103,7 @@ Register it in `src/index.js` (the `ListToolsRequestSchema` entry, the `switch` 
 
 ## Available tools
 
-Eleven tools. All the LW3 commands take **separated** `nodepath` and `property`/`method` parameters rather than one combined path string, so a value returned by `GETALL` can be passed straight into `GET` or `CALL`.
+Twelve tools. All the LW3 commands take **separated** `nodepath` and `property`/`method` parameters rather than one combined path string, so a value returned by `GETALL` can be passed straight into `GET` or `CALL`.
 
 ### Discovery and connection
 
@@ -104,6 +114,7 @@ Eleven tools. All the LW3 commands take **separated** `nodepath` and `property`/
   - `host` (required): IP address or hostname
   - `port` (optional, default 6107)
   - `password` (optional): the device's `admin` password. Only needed if the device requires authentication over the WSS fallback — `connect` says so when it does, and it's safe to omit otherwise
+  - `transport` (optional, `"wss"`): skip the TCP attempt for a device already known to answer only over secure WebSocket. Leave it unset normally. It exists because such a device reports port 443, and a plain TCP connect to 443 succeeds against *any* HTTPS listener — which would be mistaken for an LW3 session, leaving every command to time out
 - **disconnect** — Close the connection
 - **status** — Report whether a connection is open, and to what
 
@@ -119,6 +130,7 @@ Eleven tools. All the LW3 commands take **separated** `nodepath` and `property`/
 - **GETALL** — List a node's children, properties, and methods
   - `path` (required), e.g. `/V1/MANAGEMENT/NETWORK`
   - Returns structured JSON: `properties` (each with `nodepath`, `property`, `value`, `writable`), `nodes`, and `methods` (each with `nodepath`, `method`)
+  - A trailing `/*` asks the device to descend one level and report each child's properties. Not every device accepts that syntax — the Taurus emulator rejects it while answering the plain form, which lists children but none of their values. Where the wildcard is refused, the gateway enumerates the children and reads each, so callers get the same answer either way
 - **GETROOT** — Device root structure; equivalent to `GETALL /V1/*`
 - **CALL** — Execute a method
   - `nodepath`, `method` (required), `params` (optional)
@@ -129,9 +141,56 @@ Eleven tools. All the LW3 commands take **separated** `nodepath` and `property`/
 
 ### Video crosspoint
 
-- **xpoint** — Show the video crosspoint: which source is routed to each destination, and which sources each destination can currently switch to
-  - No parameters. Reads `/V1/MEDIA/VIDEO/XP` and `/V1/MEDIA/VIDEO`, plus a per-destination `SWITCHABLE` read, and renders the result as text
-  - Switchability is read per destination and is not assumed uniform across them — a source `Busy` on one output can be `OK` on another, so nothing is cached, inferred, or predicted; a destination whose read fails is reported as unread rather than as refused
+Both take no parameters, and both render [an interactive panel](#the-crosspoint-panel-mcp-apps) where the host supports it, falling back to text where it does not.
+
+- **xpoint** — The `I1`/`O1` device family (UCX and similar)
+  - Reads `/V1/MEDIA/VIDEO/XP` and `/V1/MEDIA/VIDEO`, plus a per-destination `SWITCHABLE` read
+- **univ_xpoint** — Any supported family, detecting the dialect from what the device publishes
+  - Also handles TPN-MMU, whose ports are named after their stream (`41759AEC60DF_S0`, `2D66D972A0C8_D0`), routing lives in `SourceStream` rather than `ConnectedSource`, and names come from `StreamAlias`
+  - Detection keys on the **routing property**, not the port-name shape: the property is what the panel has to write, so a device with unfamiliar port names but recognised routing is still usable. An unrecognised device says so rather than returning an empty grid, which would read as a device with nothing routed
+  - `xpoint` is deliberately left alone rather than generalised — it is in use, and changing it would be a breaking change
+
+Switchability is read per destination and is not assumed uniform across them — a source `Busy` on one output can be `OK` on another, so nothing is cached, inferred, or predicted. A destination whose read fails is reported as unread rather than as refused, and one that publishes no `SWITCHABLE` data at all is treated as publishing *no restriction* rather than as refusing every source: some devices simply do not implement it, and blocking every cell would invent a rule the device never stated.
+
+## The crosspoint panel (MCP Apps)
+
+`xpoint` and `univ_xpoint` return an interactive routing grid as well as text. Destinations
+are rows, sources are columns, and clicking a cell switches it. Clicking the cell that is
+already routed disconnects that destination — there is no separate Disconnect column, so
+the action sits on the thing being undone. Port headers are tinted green or grey by
+`SignalPresent`; a port the device never reported keeps the default colour, because
+"unreported" and "no signal" are different claims.
+
+Hosts that have not negotiated the extension get the text rendering instead, and only
+those: beside a live panel, a text summary is a snapshot frozen at call time that goes
+stale on the first click — while reading as more authoritative than the panel, being more
+detailed.
+
+Four host behaviours shape the implementation. None is in the specification, and all four
+were established the hard way:
+
+- **The extension must be negotiated at `initialize`** — `capabilities.extensions
+  ["io.modelcontextprotocol/ui"]`. The `ui://` resource and the tool's `_meta.ui` are not
+  sufficient; without it the host quietly renders the text.
+- **A `ui://` URI is cached by the host from its first use.** One published before the
+  capability was declared never rendered again, across eight releases and a rewrite, while
+  every freshly named URI worked first time. Renaming is the only recovery — which is why
+  the panel is `ui://lw3-mcp/xpoint-panel-v2`.
+- **The panel's tool calls reach a different server instance than the chat's.** It cannot
+  see the chat's device connection, so the grid travels with the tool result in
+  `structuredContent`, and the panel opens its own connection before it can switch.
+- **The panel confirms which device it holds before writing.** The instance is shared
+  across panels and may already be connected to whatever an earlier one opened — in which
+  case a `SET` succeeds, against the wrong matrix. Confirming first, rather than
+  reconnecting only after a failure, is the difference between a refused click and a
+  mis-routed one.
+
+Where the device needs a password, the panel asks for it once and holds it in memory for
+that panel alone. It is never placed in `structuredContent`, which is visible in the
+conversation's raw tool-output view.
+
+General notes on building these — independent of this project — are in the
+`building-mcp-apps` skill.
 
 ## How discovery works
 
@@ -185,8 +244,16 @@ lw3-mcp/
 │   │   ├── tcp.js               # raw TCP socket, port 6107
 │   │   └── wss.js               # secure WebSocket fallback, wss://<host>/lw3
 │   ├── lightware-discovery.js   # mDNS device discovery
-│   └── xpoint.js                # pure video crosspoint grid model + text rendering
+│   ├── xpoint.js                # crosspoint grid model, I1/O1 family
+│   └── univ-xpoint.js           # crosspoint grid model, dialect-detecting
+├── ui/
+│   ├── xpoint.src.html          # panel source; edit this one
+│   ├── univ-xpoint.src.html     # GENERATED from xpoint.src.html
+│   ├── xpoint.html              # GENERATED: source + SDK + grid model inlined
+│   └── univ-xpoint.html         # GENERATED
 ├── scripts/
+│   ├── derive-univ-panel.js     # univ-xpoint.src.html <- xpoint.src.html
+│   ├── build-panel.js           # inlines the MCP Apps SDK and grid models
 │   ├── bundle.js                # npm run bundle
 │   └── verify-bundle.js         # unpack-and-run verification
 ├── tests/                       # node:test suites
@@ -196,6 +263,12 @@ lw3-mcp/
 ├── INSTALL.md                   # end-user install guide, ships with the .mcpb
 └── CLAUDE.md                    # architecture notes for AI coding agents
 ```
+
+The four files marked GENERATED are build output — edit `ui/xpoint.src.html` and run
+`npm run build:panel`. The panel cannot import from the server's filesystem, so the grid
+model has to live inside the document; it used to be pasted there by hand, and it went
+stale exactly as the comment asking the next editor to keep it in step had feared. Tests
+compare the built panels against their sources byte for byte and fail if either drifts.
 
 Design and implementation notes for the packaging work live in `docs/superpowers/`.
 

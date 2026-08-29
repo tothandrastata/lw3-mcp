@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "lw3-mcp",
   "display_name": "Lightware LW3 Gateway",
-  "version": "1.12.0",
+  "version": "1.12.1",
   "description": "Discover and control Lightware devices over the LW3 protocol",
   "author": {
     "name": "Andras Toth",
