@@ -608,10 +608,12 @@ async function switchRoute(destPort, srcPort) {
           },
         ],
       });
-      // Nothing failed from the user's point of view: the switch was asked for
-      // and is on its way. Going via the chat is how this panel always works,
-      // not an incident, so it does not belong in the red bar.
-      setStatus(`Requested: ${destLabel} to ${srcLabel} — see the chat`);
+      // sendMessage does not send: this host offers the text to the composer
+      // ("wants to add a prompt. Replace current text?"), and the user accepts
+      // it and presses Enter. Saying "requested" would imply the switch was
+      // already on its way and leave the user waiting for something that needs
+      // two more clicks from them.
+      setStatus(`Staged: ${destLabel} → ${srcLabel} — accept the prompt, then press Enter`);
       stage(null);
     } catch (askError) {
       setBanner(
