@@ -94,6 +94,18 @@ export class LW3Protocol extends EventEmitter {
   async connect(host, port = 6107, options = {}) {
     if (this.connected) throw new Error('Already connected to a device');
 
+    // A caller that already knows how this device answers can say so. It matters
+    // for wss: getConnectionInfo() reports port 443, and a plain TCP connect to
+    // 443 SUCCEEDS on any device serving HTTPS -- so the probe below would treat
+    // a TLS listener as an LW3 session and every command would time out against
+    // it. Skipping straight to wss also saves the TCP timeout on reconnects.
+    if (options.transport === 'wss') {
+      const known = this.createWss(host, options.password);
+      await known.connect();
+      this.attachTransport(known, 'wss', host, 443);
+      return;
+    }
+
     let tcpFailure;
     const tcp = this.createTcp(host, port);
     try {

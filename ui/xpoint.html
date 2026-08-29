@@ -794,6 +794,10 @@ async function connectSelf() {
   }
 
   const args = { host: connection.host, port: connection.port };
+  // Reconnect over whatever answered for the chat. Without this a wss device
+  // reports port 443, TCP connects to its HTTPS listener, and every command
+  // times out against a socket that was never speaking LW3.
+  if (connection.transport === 'wss') args.transport = 'wss';
   if (devicePassword) args.password = devicePassword;
   await callTool('connect', args);
   selfConnected = true;
@@ -1011,11 +1015,16 @@ async function refresh() {
     hostLog('connect() resolved; host context: ' + JSON.stringify(app.getHostContext() || null));
   } catch (err) { /* ignore */ }
 
-  await refresh();
+  // Deliberately no refresh here. The grid came with the tool result, read by
+  // the instance the chat connected. This panel's instance may still hold a
+  // different device entirely, and refreshing from it would quietly replace
+  // correct data with another device's -- which looks like a working panel.
+  // Live polling begins only once connectSelf has pointed this instance at the
+  // device the grid is actually about, which the first click does.
   setInterval(() => {
     // switchRoute's own `await refresh()` is deliberately not gated by this:
     // the post-switch re-read must always happen.
-    if (document.hidden || busy || polling) return;
+    if (!selfConnected || document.hidden || busy || polling) return;
     polling = true;
     refresh().finally(() => { polling = false; });
   }, POLL_MS);

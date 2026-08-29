@@ -122,3 +122,34 @@ test('reassembles a line split across two chunks', async () => {
   tcp.emit('data', 'lo\r\n');
   assert.deepEqual(lines, ['pw /V1/X.Y=hello']);
 });
+
+test('transport "wss" skips TCP, which would otherwise attach an HTTPS listener', async () => {
+  // getConnectionInfo() reports port 443 for a wss device, and a plain TCP
+  // connect to 443 SUCCEEDS against anything serving HTTPS. Without this hint
+  // the probe attaches that TLS socket as an LW3 session and every command
+  // times out against a peer that never spoke the protocol.
+  const tcp = new FakeTransport();
+  const wss = new FakeTransport();
+  const { lw3, made } = build({ tcp, wss });
+
+  await lw3.connect('device.local', 443, { transport: 'wss' });
+
+  assert.equal(made.tcp, undefined, 'TCP must not be attempted when wss is specified');
+  assert.equal(lw3.getConnectionInfo().transport, 'wss');
+});
+
+test('transport "wss" still surfaces an auth challenge', async () => {
+  const authError = new AuthRequiredError(false);
+  const { lw3 } = build({ tcp: new FakeTransport(), wss: new FakeTransport(authError) });
+
+  await assert.rejects(
+    () => lw3.connect('device.local', 443, { transport: 'wss' }),
+    /requires authentication/
+  );
+});
+
+test('transport "wss" passes the password through', async () => {
+  const { lw3, made } = build({ tcp: new FakeTransport(), wss: new FakeTransport() });
+  await lw3.connect('device.local', 443, { transport: 'wss', password: 'adminadmin' });
+  assert.equal(made.wssPassword, 'adminadmin');
+});

@@ -42,7 +42,7 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '1.9.4',
+        version: '1.9.5',
       },
       {
         capabilities: {
@@ -114,6 +114,12 @@ class LW3MCPServer {
                 type: 'string',
                 description:
                   'Admin password. Only needed if the device requires authentication — connect will tell you when it does.',
+              },
+              transport: {
+                type: 'string',
+                enum: ['auto', 'wss'],
+                description:
+                  'Leave unset. "wss" skips the TCP attempt for a device already known to answer only over secure WebSocket — a plain TCP connect to port 443 succeeds against any HTTPS listener and would be mistaken for an LW3 session.',
               },
             },
             required: ['host'],
@@ -380,13 +386,13 @@ class LW3MCPServer {
   }
 
   async handleConnect(args) {
-    const { host, port = 6107, password } = args;
+    const { host, port = 6107, password, transport } = args;
 
     if (this.lw3.isConnected()) {
       throw new Error('Already connected. Please disconnect first.');
     }
 
-    await this.lw3.connect(host, port, { password });
+    await this.lw3.connect(host, port, { password, transport });
     const info = this.lw3.getConnectionInfo();
 
     return {
