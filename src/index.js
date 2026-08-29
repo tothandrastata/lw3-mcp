@@ -20,6 +20,12 @@ import { buildGrid, renderGridText, XP_NODE, VIDEO_NODE } from './xpoint.js';
 // there is exactly one string to keep in sync.
 const XPOINT_UI = 'ui://lw3-mcp/xpoint';
 
+// A deliberately minimal second app, used to tell "this host renders no MCP
+// Apps at all" apart from "the crosspoint panel renders but is invisible".
+// It performs no device I/O and has a fixed height, so anything it fails at is
+// the wiring rather than the panel.
+const PROBE_UI = 'ui://lw3-mcp/probe';
+
 /**
  * MCP Server for Lightware LW3 Protocol Gateway
  * Provides persistent connection and tools for interacting with Lightware devices
