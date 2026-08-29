@@ -14,6 +14,7 @@ import {
 import { LW3Protocol, parseGetAll } from './lw3-protocol.js';
 import { LightwareDiscovery } from './lightware-discovery.js';
 import { buildGrid, renderGridText, XP_NODE, VIDEO_NODE } from './xpoint.js';
+import { buildUniversalGrid, renderUniversalGridText } from './univ-xpoint.js';
 
 // The resource URI the xpoint tool points hosts at, and hosts fetch. Shared
 // between the ListResources/ReadResource handlers and the tool's own _meta so
@@ -26,11 +27,9 @@ import { buildGrid, renderGridText, XP_NODE, VIDEO_NODE } from './xpoint.js';
 // is a host-side cache keyed by URI, and a new name is the only way past it.
 const XPOINT_UI = 'ui://lw3-mcp/xpoint-panel-v2';
 
-// A deliberately minimal second app, used to tell "this host renders no MCP
-// Apps at all" apart from "the crosspoint panel renders but is invisible".
-// It performs no device I/O and has a fixed height, so anything it fails at is
-// the wiring rather than the panel.
-const PROBE_UI = 'ui://lw3-mcp/probe';
+// The universal panel, served to univ_xpoint. A separate URI because a ui://
+// URI is cached by the host from its first use and cannot be repurposed.
+const UNIV_XPOINT_UI = 'ui://lw3-mcp/univ-xpoint-v1';
 
 
 /**
@@ -42,7 +41,7 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '1.10.1',
+        version: '1.11.0',
       },
       {
         capabilities: {
@@ -258,14 +257,14 @@ class LW3MCPServer {
           },
         },
         {
-          name: 'uiprobe',
+          name: 'univ_xpoint',
           description:
-            'Diagnostic: render a minimal MCP Apps panel to check whether this host displays interactive UI at all. Takes no arguments and does not touch the device.',
+            'Show the crosspoint of any supported device family, detecting the routing dialect from what the device publishes. Use this for TPN-MMU and other non-I1/O1 devices; xpoint remains for the I1/O1 family.',
           inputSchema: {
             type: 'object',
             properties: {},
           },
-          _meta: { ui: { resourceUri: PROBE_UI } },
+          _meta: { ui: { resourceUri: UNIV_XPOINT_UI } },
         },
         {
           name: 'xpoint',
@@ -285,7 +284,7 @@ class LW3MCPServer {
     // startup, so the bundle's on-disk HTML is always what gets served.
     const uiDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui');
     const uiPath = join(uiDir, 'xpoint.html');
-    const probePath = join(uiDir, 'probe.html');
+    const univPath = join(uiDir, 'univ-xpoint.html');
 
     this.server.setRequestHandler(ListResourcesRequestSchema, async () => ({
       // Kept on one line: tests/manifest.test.js counts registered *tools* by
@@ -294,12 +293,12 @@ class LW3MCPServer {
       // miscounted as a 12th tool.
       resources: [
         { uri: XPOINT_UI, name: 'Crosspoint panel', mimeType: 'text/html;profile=mcp-app' },
-        { uri: PROBE_UI, name: 'MCP Apps probe', mimeType: 'text/html;profile=mcp-app' },
+        { uri: UNIV_XPOINT_UI, name: 'Crosspoint panel (all families)', mimeType: 'text/html;profile=mcp-app' },
       ],
     }));
 
     this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-      const files = { [XPOINT_UI]: uiPath, [PROBE_UI]: probePath };
+      const files = { [XPOINT_UI]: uiPath, [UNIV_XPOINT_UI]: univPath };
       const file = files[request.params.uri];
       if (!file) {
         throw new Error(`Unknown resource: ${request.params.uri}`);
@@ -351,20 +350,8 @@ class LW3MCPServer {
           case 'discover':
             return await this.handleDiscover(args);
 
-          case 'uiprobe':
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text:
-                    'Diagnostic panel requested. You cannot see rendered MCP App panels -- ' +
-                    'only this text reaches you -- so do not state whether the panel appeared. ' +
-                    'Ask the user what they see: a red "MCP Apps probe" box means this host ' +
-                    'renders MCP Apps; no box means it does not. The panel performs no device I/O.',
-                },
-              ],
-              _meta: { ui: { resourceUri: PROBE_UI } },
-            };
+          case 'univ_xpoint':
+            return await this.handleUniversalXpoint();
 
           case 'xpoint':
             return await this.handleXpoint();
@@ -658,6 +645,62 @@ class LW3MCPServer {
     } finally {
       discovery.stopDiscovery();
     }
+  }
+
+  /**
+   * Crosspoint for any supported device family.
+   *
+   * Deliberately separate from handleXpoint: that tool is in use against the
+   * I1/O1 family and must not change behaviour. This one detects the routing
+   * dialect from what the device publishes, so it works for TPN-MMU (ports
+   * named after their stream, routing in SourceStream) as well.
+   */
+  async handleUniversalXpoint() {
+    this.ensureConnected();
+
+    let xpLines;
+    try {
+      xpLines = await this.lw3.getAllDeep(XP_NODE);
+    } catch (error) {
+      throw new Error(
+        `Could not read the crosspoint at ${XP_NODE} — ${error.message}. ` +
+          'This device may not have a video crosspoint, or may use a different node layout.'
+      );
+    }
+
+    // SWITCHABLE is a child node per destination, so which destinations exist
+    // has to be settled first -- and that is dialect-dependent, which is why the
+    // grid is built twice rather than the ports guessed from their names.
+    const provisional = buildUniversalGrid({ xpLines, switchableLines: [] });
+
+    const switchableLines = [];
+    const switchableErrors = [];
+    for (const destination of provisional.destinations) {
+      try {
+        switchableLines.push(
+          ...(await this.lw3.sendCommand(`GETALL ${XP_NODE}/${destination.port}/SWITCHABLE`))
+        );
+      } catch (error) {
+        // A device without SWITCHABLE is normal, not a failure: buildUniversalGrid
+        // treats a destination that published none as unrestricted.
+        console.error(`[univ_xpoint] no SWITCHABLE for ${destination.port}:`, error.message);
+        switchableErrors.push(`${destination.port}: ${error.message}`);
+      }
+    }
+
+    const grid = buildUniversalGrid({ xpLines, switchableLines });
+
+    const text = this.hostRendersApps()
+      ? `Crosspoint panel opened (device family: ${grid.dialect || 'unrecognised'}). It shows ` +
+        'the current routing, stays up to date, and switches when a cell is clicked. Do not ' +
+        'restate the routing: it changes as the user clicks and any summary here goes stale.'
+      : renderUniversalGridText(grid);
+
+    return {
+      content: [{ type: 'text', text }],
+      structuredContent: { ...grid, connection: this.lw3.getConnectionInfo() },
+      _meta: { ui: { resourceUri: UNIV_XPOINT_UI } },
+    };
   }
 
   async handleXpoint() {

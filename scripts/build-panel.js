@@ -22,11 +22,18 @@ const SDK = join(
   'node_modules/@modelcontextprotocol/ext-apps/dist/src/app-with-deps.js'
 );
 const PANELS = [
-  { src: join(ROOT, 'ui/xpoint.src.html'), out: join(ROOT, 'ui/xpoint.html') },
-  { src: join(ROOT, 'ui/probe.src.html'), out: join(ROOT, 'ui/probe.html') },
+  {
+    src: join(ROOT, 'ui/xpoint.src.html'),
+    out: join(ROOT, 'ui/xpoint.html'),
+    model: join(ROOT, 'src/xpoint.js'),
+  },
+  {
+    src: join(ROOT, 'ui/univ-xpoint.src.html'),
+    out: join(ROOT, 'ui/univ-xpoint.html'),
+    model: join(ROOT, 'src/univ-xpoint.js'),
+  },
 ];
 const PLACEHOLDER = '/* __MCP_APPS_SDK__ */';
-const MODEL = join(ROOT, 'src/xpoint.js');
 const MODEL_PLACEHOLDER = '/* __XPOINT_MODEL__ */';
 
 /** Names the panel needs out of the SDK bundle. */
@@ -68,7 +75,7 @@ const inlined = [
 // substitution patterns when the replacement is a plain string, splicing parts
 // of this very document into the middle of the script. A replacer function is
 // handed the text verbatim.
-for (const { src: srcPath, out, padTo } of PANELS) {
+for (const { src: srcPath, out, model } of PANELS) {
   const src = readFileSync(srcPath, 'utf8');
   if (!src.includes(PLACEHOLDER)) {
     throw new Error(`${srcPath} is missing the ${PLACEHOLDER} marker`);
@@ -79,15 +86,9 @@ for (const { src: srcPath, out, padTo } of PANELS) {
   // go: the iframe runs this as one document, not as an ES module. Anything
   // else that differs between the two copies is a divergence waiting to happen.
   if (html.includes(MODEL_PLACEHOLDER)) {
-    const model = readFileSync(MODEL, 'utf8').replace(/^export /gm, '');
-    html = html.replace(MODEL_PLACEHOLDER, () => model);
-  }
-  if (padTo && html.length < padTo) {
-    // An HTML comment of X's: inert, and the SDK bundle provably contains no
-    // "-->" that could close it early (checked before inlining was adopted).
-    const filler = 'X'.repeat(padTo - html.length - 20);
-    html = html.replace('</body>', () => `<!-- ${filler} -->
-</body>`);
+    if (!model) throw new Error(`${srcPath} wants a model but none is configured`);
+    const source = readFileSync(model, 'utf8').replace(/^export /gm, '');
+    html = html.replace(MODEL_PLACEHOLDER, () => source);
   }
   writeFileSync(out, html, 'utf8');
 }

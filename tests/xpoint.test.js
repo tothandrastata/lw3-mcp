@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { buildGrid, cellState, renderGridText, XP_NODE, VIDEO_NODE } from '../src/xpoint.js';
+import { buildUniversalGrid, detectDialect, renderUniversalGridText } from '../src/univ-xpoint.js';
 
 // Captured verbatim from a UCX-4x2-HC30 on 2026-08-28.
 const xpLines = [
@@ -315,5 +316,87 @@ test('the panel embeds the tested model verbatim, not a hand-kept copy', () => {
   for (const fn of ['buildGrid', 'cellState', 'renderGridText']) {
     assert.equal(bodyOf(panel, fn), bodyOf(model, fn),
       `${fn} in the built panel differs from src/xpoint.js — rebuild with npm run build:panel`);
+  }
+});
+
+// --- univ_xpoint: dialect detection -----------------------------------------
+
+test('detects the I1/O1 family from ConnectedSource', () => {
+  const { dialect, reason } = detectDialect([
+    'pw /V1/MEDIA/VIDEO/XP/O1.ConnectedSource=I2',
+    'pw /V1/MEDIA/VIDEO/XP/I1.SignalPresent=true',
+  ]);
+  assert.equal(dialect.id, 'ucx');
+  assert.match(reason, /ConnectedSource/);
+});
+
+test('detects the stream-named family from SourceStream', () => {
+  const { dialect } = detectDialect([
+    'pw /V1/MEDIA/VIDEO/XP/2D66D972A0C8_D0.SourceStream=41759AEC60DF_S0',
+  ]);
+  assert.equal(dialect.id, 'tpn');
+});
+
+test('an unrecognised device is reported, not silently drawn as empty', () => {
+  // An empty grid reads as "a device with nothing routed", which is a different
+  // and much more misleading claim than "this device was not recognised".
+  const grid = buildUniversalGrid({ xpLines: ['pw /V1/MEDIA/VIDEO/XP/Q1.Whatever=x'] });
+  assert.equal(grid.dialect, null);
+  assert.match(grid.reason, /no known routing property/);
+  assert.match(renderUniversalGridText(grid), /not recognised/);
+});
+
+test('the stream-named family is labelled by alias and routed by SourceStream', () => {
+  const grid = buildUniversalGrid({
+    xpLines: [
+      'pr /V1/MEDIA/VIDEO/XP/2D66D972A0C8_D0.StreamAlias=RX3_D0',
+      'pw /V1/MEDIA/VIDEO/XP/2D66D972A0C8_D0.SourceStream=41759AEC60DF_S0',
+      'pr /V1/MEDIA/VIDEO/XP/2D66D972A0C8_D0.SignalPresent=true',
+      'pr /V1/MEDIA/VIDEO/XP/41759AEC60DF_S0.StreamAlias=TX3_S0',
+      'pw /V1/MEDIA/VIDEO/XP/41759AEC60DF_S0.SignalPresent=false',
+    ],
+  });
+
+  assert.equal(grid.dialect, 'tpn');
+  assert.equal(grid.routeProp, 'SourceStream');
+  assert.deepEqual(grid.destinations.map((d) => d.name), ['RX3_D0']);
+  assert.deepEqual(grid.sources.map((s) => s.name), ['TX3_S0']);
+  assert.equal(grid.destinations[0].connectedSource, '41759AEC60DF_S0');
+  assert.equal(grid.sources[0].signalPresent, false);
+
+  // No Disconnect column: the token that clears a destination on this family is
+  // not known, and offering a control whose value we are guessing could route
+  // something unintended on real hardware.
+  assert.equal(grid.sources.some((s) => s.name === 'Disconnect'), false);
+});
+
+test('the I1/O1 family keeps its Disconnect column', () => {
+  const grid = buildUniversalGrid({
+    xpLines: [
+      'pw /V1/MEDIA/VIDEO/XP/O1.ConnectedSource=I1',
+      'pw /V1/MEDIA/VIDEO/XP/O1.Lock=false',
+      'pw /V1/MEDIA/VIDEO/XP/I1.Name=Camera',
+    ],
+  });
+  assert.equal(grid.dialect, 'ucx');
+  assert.equal(grid.sources[0].name, 'Disconnect');
+  assert.equal(grid.sources[0].port, '0');
+});
+
+test('the built universal panel embeds src/univ-xpoint.js verbatim', () => {
+  const model = readFileSync(new URL('../src/univ-xpoint.js', import.meta.url), 'utf8');
+  const panel = readFileSync(new URL('../ui/univ-xpoint.html', import.meta.url), 'utf8');
+  const bodyOf = (source, name) => {
+    const at = source.indexOf(`function ${name}(`);
+    assert.ok(at >= 0, `${name} not found`);
+    let depth = 0;
+    for (let i = source.indexOf('{', at); i < source.length; i++) {
+      if (source[i] === '{') depth++;
+      else if (source[i] === '}' && --depth === 0) return source.slice(at, i + 1).replace(/\r\n/g, '\n').trim();
+    }
+    throw new Error(`unbalanced ${name}`);
+  };
+  for (const fn of ['buildUniversalGrid', 'cellState', 'detectDialect']) {
+    assert.equal(bodyOf(panel, fn), bodyOf(model, fn), `${fn} differs — run npm run build:panel`);
   }
 });

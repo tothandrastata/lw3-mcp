@@ -127,11 +127,31 @@ marked every cell `Unavailable` while every test passed, because the tests only 
 exercised the module. `tests/xpoint.test.js` now compares the built panel's `buildGrid`,
 `cellState` and `renderGridText` against the module byte for byte.
 
-`uiprobe` is kept deliberately: a dependency-free panel that renders a fixed red box and
-reports its handshake separately from its static HTML. It is the only way to tell "this
-host does not render MCP Apps" from "our panel is broken", and it settled that question
-here after several releases of guesswork. `scripts/build-panel.js` inlines the ext-apps
-SDK into both panels; see the `building-mcp-apps` skill for the general lessons.
+## Two crosspoint tools
+
+`xpoint` serves the I1/O1 family and is **frozen**: it is in use, and changing its
+behaviour is a breaking change. `univ_xpoint` ([src/univ-xpoint.js](src/univ-xpoint.js))
+detects the device family from what the crosspoint publishes and serves both.
+
+| | `xpoint` | `univ_xpoint` |
+|---|---|---|
+| Ports | `I1` / `O1` | plus `…_S0` / `…_D0` |
+| Routing property | `ConnectedSource` | that, or `SourceStream` |
+| Names | `Name` on `/V1/MEDIA/VIDEO/<port>` | `Name` or `StreamAlias`, read from the XP node |
+| Disconnect column | always | only where the token is known — **not** for TPN |
+
+Detection keys on the **routing property**, not on port-name shape: the property is what
+the panel has to write, so a device with unfamiliar port names but recognised routing is
+still usable. An unrecognised device says so rather than drawing an empty grid, which
+would read as "a device with nothing routed".
+
+The TPN disconnect token is unknown: the emulator accepts any value at all — `0`, empty,
+even `none` — so it cannot be established there, and no real unit has been available.
+Until it is, that family gets no Disconnect column rather than a guessed one.
+
+The diagnostic probe panels have been removed now that the panel works. If a host ever
+needs checking again, `probe-panel.html` in the `building-mcp-apps` skill is the same
+thing, ready to drop back in.
 
 Text content is sent only to hosts that cannot render (`hostRendersApps()`), because
 beside a live panel a text rendering is a snapshot that goes stale on the first click —
