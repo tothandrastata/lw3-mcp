@@ -72,6 +72,9 @@ export function buildGrid({ xpLines = [], videoLines = [], switchableLines = [] 
 
   return {
     // '0' is the device's own token for "disconnect this destination".
+    // It stays in sources for the text rendering; the panel hides that column
+    // and sends this value when a routed cell is clicked.
+    disconnect: '0',
     sources: [{ port: '0', name: 'Disconnect', signalPresent: null }, ...inputs.map(named)],
     destinations: outputs.map((port) => ({
       ...named(port),

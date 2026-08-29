@@ -194,7 +194,11 @@
     cursor: pointer;
     color: var(--fg);
   }
+  td.cell[data-dest] { cursor: pointer; }
   td.cell[data-dest]:hover { background: var(--enabled-hover); }
+  /* The routed cell is clickable too, to undo the route. Its hover has to differ
+     from the plain one, or it reads as "already done, nothing to click". */
+  td.cell.selected[data-dest]:hover { filter: brightness(1.15); }
   td.cell[data-dest]:focus-visible {
     outline: 2px solid var(--focus-ring);
     outline-offset: -2px;
@@ -477,7 +481,7 @@ function setStatus(text) {
 function render(grid) {
   if (grid && grid.dialect === null) {
     // Better to say the device was not recognised than to draw an empty grid,
-    // which looks like a device with nothing routed.
+    // which reads as a device with nothing routed.
     gridEl.innerHTML = '';
     setBanner(`This device's crosspoint was not recognised: ${grid.reason}`, { stale: false });
     return;
@@ -498,29 +502,44 @@ function render(grid) {
       : p.signalPresent === false
         ? 'no signal'
         : 'signal not reported by the device';
-  const headerCells = grid.sources
-    .map((s) =>
-      // Disconnect is not a port and has no signal to report.
-      s.port === '0'
-        ? `<th scope="col">${escapeHtml(s.name)}</th>`
-        : `<th scope="col" class="port${signalClass(s)}" title="${escapeHtml(s.name)} — ${signalTitle(s)}">` +
-          `${escapeHtml(s.name)}</th>`
+  // The disconnect token gets no column of its own: clicking the cell that is
+  // already routed disconnects that destination instead. One fewer column, and
+  // the action sits on the thing being undone.
+  const columns = grid.sources.filter((s) => s.port !== grid.disconnect);
+
+  const headerCells = columns
+    .map(
+      (s) =>
+        `<th scope="col" class="port${signalClass(s)}" title="${escapeHtml(s.name)} — ${signalTitle(s)}">` +
+        `${escapeHtml(s.name)}</th>`
     )
     .join('');
   const thead = `<thead><tr><th scope="col" class="corner"></th>${headerCells}</tr></thead>`;
 
+  const canDisconnect = grid.disconnect !== null && grid.disconnect !== undefined;
+
   const rows = grid.destinations.map((d) => {
-    const cells = grid.sources.map((s) => {
+    const cells = columns.map((s) => {
       const state = cellState(grid, d.port, s.port);
       const classes = ['cell'];
       if (state.selected) classes.push('selected');
       if (!state.enabled) classes.push('disabled');
 
-      const clickable = state.enabled && !state.selected;
+      // A routed cell stays clickable, and clicking it writes the disconnect
+      // token rather than the source it names -- so the click handler itself
+      // needs to know nothing about any of this.
+      const clickable = state.selected ? canDisconnect : state.enabled;
+      const clickValue = state.selected ? grid.disconnect : s.port;
       const attrs = clickable
-        ? ` data-dest="${escapeHtml(d.port)}" data-src="${escapeHtml(s.port)}" role="button" tabindex="0"`
+        ? ` data-dest="${escapeHtml(d.port)}" data-src="${escapeHtml(clickValue)}" role="button" tabindex="0"`
         : '';
-      const title = state.reason ? ` title="${escapeHtml(state.reason)}"` : '';
+
+      const reason = state.selected
+        ? canDisconnect
+          ? 'Routed here — click to disconnect'
+          : 'Routed here'
+        : state.reason;
+      const title = reason ? ` title="${escapeHtml(reason)}"` : '';
 
       let label = '';
       if (state.selected) label = '<span class="dot" aria-hidden="true"></span>';
@@ -600,7 +619,8 @@ async function switchRoute(destPort, srcPort) {
   busy = true;
 
   const destLabel = labelFor(lastGrid && lastGrid.destinations, destPort);
-  const srcLabel = srcPort === '0' ? 'Disconnect' : labelFor(lastGrid && lastGrid.sources, srcPort);
+  const disconnecting = lastGrid && srcPort === lastGrid.disconnect;
+  const srcLabel = disconnecting ? 'disconnected' : labelFor(lastGrid && lastGrid.sources, srcPort);
 
   try {
     setStatus(`Switching ${destLabel} → ${srcLabel}…`);

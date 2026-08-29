@@ -54,9 +54,9 @@ export const DIALECTS = {
     routeProp: 'SourceStream',
     nameProp: 'StreamAlias',
     lockProp: null,
-    // Unknown. The emulator accepts anything at all -- '0', '', even 'none' --
-    // so it cannot tell us, and no real unit has been available to ask.
-    disconnect: null,
+    // Confirmed against real hardware. The emulator could not settle it: it
+    // accepts anything at all, '0', '' and 'none' alike.
+    disconnect: '0',
     sortKey: null,
   },
 };
@@ -155,6 +155,9 @@ export function buildUniversalGrid({ xpLines = [], switchableLines = [] }) {
     dialect: dialect.id,
     reason,
     routeProp: dialect.routeProp,
+    // The view needs it: clicking a routed cell disconnects that destination,
+    // so the panel writes this value rather than a source port.
+    disconnect: dialect.disconnect,
     sources: [...disconnectColumn, ...sourcePorts.map(describe)],
     destinations: destPorts.map((port) => ({
       ...describe(port),
