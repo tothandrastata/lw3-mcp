@@ -35,7 +35,7 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '1.7.2',
+        version: '1.7.3',
       },
       {
         capabilities: {
@@ -344,9 +344,10 @@ class LW3MCPServer {
                 {
                   type: 'text',
                   text:
-                    'Diagnostic panel requested. A host that supports MCP Apps shows a red ' +
-                    '"MCP Apps probe" box above this text; one that does not shows only this ' +
-                    'line. The panel performs no device I/O.',
+                    'Diagnostic panel requested. You cannot see rendered MCP App panels -- ' +
+                    'only this text reaches you -- so do not state whether the panel appeared. ' +
+                    'Ask the user what they see: a red "MCP Apps probe" box means this host ' +
+                    'renders MCP Apps; no box means it does not. The panel performs no device I/O.',
                 },
               ],
               _meta: { ui: { resourceUri: PROBE_UI } },

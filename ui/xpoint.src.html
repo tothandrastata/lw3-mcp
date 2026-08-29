@@ -50,6 +50,10 @@
 
   body {
     margin: 0;
+    /* The host sizes this frame from what we report, but a frame with no
+       intrinsic height renders as nothing if that report never arrives -- and
+       an error we cannot see is an error we cannot fix. */
+    min-height: 320px;
     background: var(--bg);
     color: var(--fg);
     font: 13px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif;
@@ -316,7 +320,10 @@ app.onerror = (err) => { console.error('[xpoint] app error:', err); };
  * diagnostic break the thing it is diagnosing.
  */
 function hostLog(message) {
-  try { app.sendLog({ level: 'info', data: '[xpoint] ' + message }); } catch (err) { /* ignore */ }
+  try {
+    const p = app.sendLog({ level: 'info', data: '[xpoint] ' + message });
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch (err) { /* a breadcrumb must never break what it reports on */ }
 }
 
 /**
@@ -333,7 +340,8 @@ function reportSize() {
     const width = Math.ceil(document.documentElement.scrollWidth) || 320;
     const measured = Math.ceil(document.documentElement.scrollHeight);
     const height = Math.max(measured, MIN_PANEL_HEIGHT);
-    app.sendSizeChanged({ width, height });
+    const p = app.sendSizeChanged({ width, height });
+    if (p && typeof p.catch === 'function') p.catch(() => {});
     return { width, height, measured };
   } catch (err) {
     return null;
@@ -538,17 +546,33 @@ async function refresh() {
 
 (async function main() {
   setStatus('Connecting…');
+
+  let connected = false;
+  let failure = null;
   try {
     await app.connect();
-    hostLog('connect() resolved; host context: ' + JSON.stringify(app.getHostContext() || null));
-    const size = reportSize();
-    hostLog('initial size report: ' + JSON.stringify(size));
+    connected = true;
   } catch (err) {
-    appEl.innerHTML =
-      '<div class="empty-state">Could not connect to the host: ' +
-      escapeHtml(err.message) + '</div>';
+    failure = err && err.message ? err.message : String(err);
+  }
+
+  // Before anything else, and whether or not the handshake worked. The old
+  // order returned from the catch without ever reporting a size, so the very
+  // message explaining the failure was rendered into a frame of zero height.
+  reportSize();
+
+  if (!connected) {
+    setStatus('Not connected');
+    setBanner('Could not connect to the host: ' + failure, { stale: true });
+    reportSize();
     return;
   }
+
+  // Diagnostics only, after the panel is already in a good state: nothing
+  // below may decide whether the panel works.
+  try {
+    hostLog('connect() resolved; host context: ' + JSON.stringify(app.getHostContext() || null));
+  } catch (err) { /* ignore */ }
 
   await refresh();
   setInterval(() => {
