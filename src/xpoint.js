@@ -96,7 +96,19 @@ export function cellState(grid, destPort, srcPort) {
   if (!destination) return { selected: false, enabled: false, reason: 'Unknown destination' };
   if (destination.locked) return { selected, enabled: false, reason: 'Locked' };
 
-  const status = grid.switchable[destPort]?.[srcPort];
+  const published = grid.switchable[destPort];
+
+  // No SWITCHABLE data for this destination at all -- the node was unreadable, or
+  // the device does not implement it (the Taurus emulator does not). That is not
+  // the device refusing a switch, it is the device publishing no restrictions, so
+  // blocking every source would invent a rule rather than honour one. A switch the
+  // device will not accept still fails visibly at the SET.
+  //
+  // Distinct from a destination that DID publish switchability without mentioning
+  // this source: there the device has spoken, and we honour it.
+  if (published === undefined) return { selected, enabled: true, reason: null };
+
+  const status = published[srcPort];
   if (status === undefined) return { selected, enabled: false, reason: 'Unavailable' };
   if (status !== 'OK') return { selected, enabled: false, reason: status };
 
@@ -142,13 +154,14 @@ export function renderGridText(grid) {
       canSwitch.push(`  ${d.name} can switch to: ${available.join(', ')}`);
     }
 
-    // 'Unavailable' means the device was never asked, or never answered - not that
-    // it refused. That is a different fact from a device answer like 'Busy', so it
-    // is kept out of the device-answers list and reported once per destination
-    // instead of once per source, in a separate summary line below.
-    if (cells.some(({ state }) => !state.enabled && !state.selected && state.reason === 'Unavailable')) {
-      unread.push(d.name);
-    }
+      // A destination that published no switchability at all. Its cells are
+      // enabled -- the device stated no restriction, so we invent none -- but the
+      // reader still needs telling that nothing was read, which is a different
+      // fact from the device having answered 'OK'. Reported once per destination
+      // here rather than once per source.
+      if (grid.switchable[d.port] === undefined) {
+        unread.push(d.name);
+      }
 
     for (const { source, state } of cells) {
       if (state.enabled || state.selected || state.reason === 'Unavailable') continue;

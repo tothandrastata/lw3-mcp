@@ -240,3 +240,51 @@ test('the text names a source each destination can switch to', () => {
   // non-uniformity directly, which is the whole point of showing it.
   assert.match(text, /HDMI out 2 can switch to:.*USB-C in 1/);
 });
+
+test('a destination that published no switchability is switchable, not blocked', () => {
+  // The Taurus emulator has no SWITCHABLE node at all. Publishing no restriction
+  // is not the same as refusing, and treating it as a refusal makes every cell of
+  // such a device dead.
+  const g = buildGrid({
+    xpLines: [
+      'pw /V1/MEDIA/VIDEO/XP/O1.Lock=false',
+      'pw /V1/MEDIA/VIDEO/XP/O1.ConnectedSource=I1',
+    ],
+    videoLines: [
+      'pw /V1/MEDIA/VIDEO/I1.Name=In One',
+      'pw /V1/MEDIA/VIDEO/I2.Name=In Two',
+      'pw /V1/MEDIA/VIDEO/O1.Name=Out One',
+    ],
+    switchableLines: [],
+  });
+
+  const other = cellState(g, 'O1', 'I2');
+  assert.equal(other.enabled, true, 'no published restriction must not block the cell');
+  assert.equal(other.reason, null);
+
+  const current = cellState(g, 'O1', 'I1');
+  assert.equal(current.selected, true);
+
+  // The absence is still reported, just not as a per-cell refusal.
+  assert.match(renderGridText(g), /could not be read/i);
+});
+
+test('a destination that published switchability still has absent sources blocked', () => {
+  // The opposite case, and the reason the two cannot be folded together: here the
+  // device did answer, and staying silent about a source is the device's own word.
+  const g = buildGrid({
+    xpLines: [
+      'pw /V1/MEDIA/VIDEO/XP/O1.Lock=false',
+      'pw /V1/MEDIA/VIDEO/XP/O1.ConnectedSource=I1',
+    ],
+    videoLines: [
+      'pw /V1/MEDIA/VIDEO/I1.Name=In One',
+      'pw /V1/MEDIA/VIDEO/I2.Name=In Two',
+      'pw /V1/MEDIA/VIDEO/O1.Name=Out One',
+    ],
+    switchableLines: ['pr /V1/MEDIA/VIDEO/XP/O1/SWITCHABLE.I1=OK'],
+  });
+
+  assert.equal(cellState(g, 'O1', 'I2').enabled, false);
+  assert.equal(cellState(g, 'O1', 'I2').reason, 'Unavailable');
+});

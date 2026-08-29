@@ -283,6 +283,49 @@ export class LW3Protocol extends EventEmitter {
     return parseGetAll(await this.sendCommand(command));
   }
 
+  /**
+   * Read a node's children *with their contents*.
+   *
+   * `GETALL <node>/*` asks the device to descend one level and report each
+   * child's properties. Real Lightware hardware answers it; the Taurus emulator
+   * rejects it with %E002:Not exists while answering plain `GETALL <node>`,
+   * which lists the children but none of their properties -- not the same thing,
+   * and not enough for callers that need the values.
+   *
+   * So: try the wildcard, and where it is unsupported, enumerate the children
+   * and read each one. That costs 1+N commands instead of 1, which is why it is
+   * a fallback rather than the default.
+   *
+   * @param {string} nodePath - node path with no trailing slash or wildcard
+   * @returns {Promise<string[]>} raw reply lines, wildcard-shaped either way
+   */
+  async getAllDeep(nodePath) {
+    try {
+      return await this.sendCommand(`GETALL ${nodePath}/*`);
+    } catch (wildcardError) {
+      let listing;
+      try {
+        listing = await this.sendCommand(`GETALL ${nodePath}`);
+      } catch (plainError) {
+        // Neither form worked, so the node is the problem, not the dialect.
+        // Report the wildcard failure: it is the command callers expect.
+        throw wildcardError;
+      }
+
+      const lines = [...listing];
+      for (const child of listing.filter((l) => l.startsWith('n- '))) {
+        const childPath = child.slice(3).trim();
+        try {
+          lines.push(...(await this.sendCommand(`GETALL ${childPath}`)));
+        } catch (childError) {
+          // One unreadable child must not cost the caller the rest of the tree.
+          this.emit('unsolicited', `GETALL ${childPath} failed: ${childError.message}`);
+        }
+      }
+      return lines;
+    }
+  }
+
   async call(method, params = []) {
     const paramsStr = params.length > 0 ? ` ${params.join(' ')}` : '';
     return (await this.sendCommand(`CALL ${method}${paramsStr}`)).join('\n');
@@ -302,7 +345,7 @@ export class LW3Protocol extends EventEmitter {
    * @returns {Promise<{properties: Array, nodes: Array, methods: Array}>}
    */
   async getRoot() {
-    return await this.getAll('/V1/*');
+    return parseGetAll(await this.getAllDeep('/V1'));
   }
 
   /**

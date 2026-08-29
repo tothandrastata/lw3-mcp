@@ -42,7 +42,7 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '1.8.1',
+        version: '1.9.0',
       },
       {
         capabilities: {
@@ -559,19 +559,19 @@ class LW3MCPServer {
 
     // The MCP Apps extension is advertised at initialize; the spec does not
     // guarantee where, so search the whole params object rather than one field.
-    const raw = JSON.stringify(params);
-    const ui = this.hostRendersApps()
-      ? 'yes'
-      : /"ui"\s*:/.test(raw)
-        ? 'possibly — a "ui" key is present, see raw below'
-        : 'no';
+    const ui = this.hostRendersApps() ? 'yes' : 'no';
 
+    // Unmistakably headed, because it previously was not: a reader saw the client
+    // name and capability list directly under the device status and concluded the
+    // gateway had connected to some other local MCP process rather than a device.
+    // The raw initialize params were the worst of it -- a JSON blob that reads
+    // like a device banner -- so they are gone. Nothing here describes the device.
     return [
-      `Client: ${name}`,
-      `Protocol: ${params.protocolVersion || 'unstated'}`,
-      `Capabilities: ${declared.length ? declared.join(', ') : 'none declared'}`,
-      `MCP Apps (io.modelcontextprotocol/ui): ${ui}`,
-      `Raw initialize params: ${raw}`,
+      '--- MCP host this gateway runs under (nothing here describes the device) ---',
+      `Host application: ${name}`,
+      `MCP protocol: ${params.protocolVersion || 'unstated'}`,
+      `Host capabilities: ${declared.length ? declared.join(', ') : 'none declared'}`,
+      `Renders MCP Apps panels: ${ui}`,
     ].join('\n');
   }
 
@@ -653,7 +653,7 @@ class LW3MCPServer {
 
     let xpLines;
     try {
-      xpLines = await this.lw3.sendCommand(`GETALL ${XP_NODE}/*`);
+      xpLines = await this.lw3.getAllDeep(XP_NODE);
     } catch (error) {
       throw new Error(
         `Could not read the video crosspoint at ${XP_NODE} — ${error.message}. ` +
@@ -661,7 +661,7 @@ class LW3MCPServer {
       );
     }
 
-    const videoLines = await this.lw3.sendCommand(`GETALL ${VIDEO_NODE}/*`);
+    const videoLines = await this.lw3.getAllDeep(VIDEO_NODE);
 
     // SWITCHABLE is a child node per destination, so it needs one call each. A
     // timeout or a missing SWITCHABLE child on one destination must not cost the

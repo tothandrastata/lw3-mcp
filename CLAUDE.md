@@ -87,8 +87,60 @@ Property lines are split with `/^p[rw] (.+?)\.([^=]+)=(.*)$/` (non-greedy path, 
 
 `discover` opens one mDNS socket per external IPv4 interface — `multicast-dns` transmits on only one OS-chosen interface, which a Hyper-V or VPN adapter can win over the real LAN — each bound to `0.0.0.0` (not the interface address) so multicast replies actually reach it on Linux/macOS, which deliver a multicast packet only to a socket bound to a wildcard or matching address. Each socket queries the known Lightware service-type list (most, but not `_lara-https` or `_update-rest-https`, have both a plain and a `-https`/`-wss` variant, since HTTP-disabled devices advertise only the secure one) plus whatever Lightware-looking types the network's own `_services._dns-sd._udp.local` enumeration reports (`_lmdmp._udp.local` is deliberately excluded: a UDP management protocol, not LW3). All name/service-type comparisons are case-insensitive per RFC 6762. A PTR/SRV is registered only when it answers a service type this scan actually queried — mDNS is broadcast, so without that check an unrelated device's own announcements would be registered as a Lightware device too. Queries are re-issued three times inside the timeout (default 3000 ms) to cover the PTR → SRV → A chase. Every instance found is reported, keyed by its mDNS instance label: `modelName`/`serialNumber`/`hostname`/`ipAddress` are each `null` when unresolved (name doesn't match `PRODUCT SERIAL` — `/^([\w-]+)\s+([A-F0-9]+)$/i` —, no SRV arrived, or no A record arrived in time). `discover` throws, rather than returning `[]`, if no interface can open a socket at all.
 
+## The crosspoint panel (MCP Apps)
+
+`xpoint` returns a `ui://` HTML panel as well as text. Four host behaviours shape the
+design, none of them documented upstream; all were established the hard way in this repo.
+
+- **The extension must be negotiated at `initialize`** — `capabilities.extensions
+  ["io.modelcontextprotocol/ui"]`. The `ui://` resource and the tool's `_meta.ui` are not
+  sufficient: without the capability the host renders the text and says nothing.
+- **A `ui://` URI is cached by the host, permanently.** `ui://lw3-mcp/xpoint` was first
+  published by 1.6.0, before that capability existed, and never rendered again across
+  eight releases and an SDK rewrite, while every freshly named probe URI worked first
+  time. The panel is now `ui://lw3-mcp/xpoint-panel-v2`. **Never publish a `ui://` URI
+  before the panel works**, and if one is burned, rename it — nothing else recovers it.
+- **App-initiated tool calls reach a different server instance.** The panel's `GETALL`
+  reported "Not connected" while the chat held an open WSS session. So the panel renders
+  from `structuredContent` delivered with the tool result (`app.ontoolresult`), and opens
+  its own connection — from the address in that result — before it can switch. No
+  password is ever sent into the panel: it runs in a sandboxed third-party frame.
+- **The panel must report its size** (`app.sendSizeChanged`) or the frame can be zero
+  height, which hides static markup too. `body` carries an intrinsic `min-height` as a
+  floor so a panel that fails can still display why.
+
+`uiprobe` is kept deliberately: a dependency-free panel that renders a fixed red box and
+reports its handshake separately from its static HTML. It is the only way to tell "this
+host does not render MCP Apps" from "our panel is broken", and it settled that question
+here after several releases of guesswork. `scripts/build-panel.js` inlines the ext-apps
+SDK into both panels; see the `building-mcp-apps` skill for the general lessons.
+
+Text content is sent only to hosts that cannot render (`hostRendersApps()`), because
+beside a live panel a text rendering is a snapshot that goes stale on the first click —
+and reads as more authoritative than the panel, being more detailed.
+
+## Device dialects: the `/*` wildcard
+
+`GETALL <node>/*` asks the device to descend one level and report each child's
+properties. Real Lightware hardware answers it. **The Taurus emulator rejects it**
+(`%E002:Not exists`) while answering plain `GETALL <node>`, which lists children but none
+of their properties — not the same thing, and not enough for callers that need values.
+
+`LW3Protocol.getAllDeep(nodePath)` tries the wildcard and, where unsupported, enumerates
+the children and reads each (1+N commands instead of 1). `getRoot()` and `handleXpoint`
+both use it. Prefer it over hand-writing `GETALL …/*` anywhere new.
+
+The emulator also has **no `SWITCHABLE` node**. `cellState` distinguishes a destination
+that published no switchability at all (cells enabled — the device stated no restriction,
+so inventing one would make every cell dead) from one that published switchability
+without mentioning a source (that cell blocked — the device has spoken). The text
+rendering still reports which destinations went unread.
 ## Constraints when editing
 
+- **`npm test` does not import `src/index.js`** (doing so starts a server on stdio);
+  `manifest.test.js` reads it as text. `tests/source-syntax.test.js` runs `node --check`
+  over `src/` and `scripts/` because a syntax error in `index.js` once passed a green
+  115-test run and surfaced only when the packed bundle refused to start.
 - **stdout belongs to the MCP stdio transport.** All logging goes to stderr via `console.error`; a stray `console.log` corrupts the protocol stream.
 - Tool failures are returned as ordinary text content (`Error: <message>`) from the `CallToolRequestSchema` catch block, not as MCP protocol errors — no `isError` flag is set. Keep new tools consistent or change it deliberately everywhere.
 - `connect` refuses when already connected (checked in both `handleConnect` and `LW3Protocol.connect`); there is no reconnect logic and no keepalive.
