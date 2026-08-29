@@ -177,7 +177,6 @@
   /* signalPresent === null gets no class: the device never reported it, which
      is not the same claim as reporting no signal. */
 
-  .signal-mark { font-weight: 400; opacity: 0.75; margin-left: 0.3rem; }
 
   td.cell { min-width: 2.75rem; color: var(--disabled-fg); }
 
@@ -747,8 +746,8 @@ function render(grid) {
     return;
   }
 
-  // Colour alone would exclude anyone who cannot distinguish it, so the mark
-  // and the tooltip carry the same fact.
+  // Colour is the only visual carrier, by choice. The tooltip still states the
+  // signal in words, so it is not the only carrier outright.
   const signalClass = (p) =>
     p.signalPresent === true ? ' signal-yes' : p.signalPresent === false ? ' signal-no' : '';
   const signalTitle = (p) =>
@@ -757,20 +756,13 @@ function render(grid) {
       : p.signalPresent === false
         ? 'no signal'
         : 'signal not reported by the device';
-  const signalMark = (p) =>
-    p.signalPresent === true
-      ? '<span class="signal-mark" aria-hidden="true">●</span>'
-      : p.signalPresent === false
-        ? '<span class="signal-mark" aria-hidden="true">○</span>'
-        : '';
-
   const headerCells = grid.sources
     .map((s) =>
       // Disconnect is not a port and has no signal to report.
       s.port === '0'
         ? `<th scope="col">${escapeHtml(s.name)}</th>`
         : `<th scope="col" class="port${signalClass(s)}" title="${escapeHtml(s.name)} — ${signalTitle(s)}">` +
-          `${escapeHtml(s.name)}${signalMark(s)}</th>`
+          `${escapeHtml(s.name)}</th>`
     )
     .join('');
   const thead = `<thead><tr><th scope="col" class="corner"></th>${headerCells}</tr></thead>`;
@@ -796,7 +788,7 @@ function render(grid) {
     }).join('');
     return (
       `<tr><th scope="row" class="port${signalClass(d)}" title="${escapeHtml(d.name)} — ${signalTitle(d)}">` +
-      `${escapeHtml(d.name)}${signalMark(d)}</th>${cells}</tr>`
+      `${escapeHtml(d.name)}</th>${cells}</tr>`
     );
   }).join('');
 
