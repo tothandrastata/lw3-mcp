@@ -105,6 +105,16 @@ design, none of them documented upstream; all were established the hard way in t
   from `structuredContent` delivered with the tool result (`app.ontoolresult`), and opens
   its own connection — from the address in that result — before it can switch. No
   password is ever sent into the panel: it runs in a sandboxed third-party frame.
+- **The panel confirms which device its instance holds before it writes.** The instance
+  is shared across panels, so it may already be connected to whatever an earlier panel
+  opened — and then a `SET` *succeeds*, against the wrong matrix, with the panel
+  redrawing to show what it just switched. `connectSelf()` therefore runs before the
+  write, never as a fallback after one fails, and a connection that cannot be confirmed
+  routes the switch through the chat instead of guessing.
+- **A `wss` device reports port 443, and TCP to 443 succeeds against any HTTPS listener.**
+  `connect()` takes a `transport` hint for this: without it the panel attached a TLS
+  socket as an LW3 session and every command timed out. The panel passes the transport
+  the chat used.
 - **The panel must report its size** (`app.sendSizeChanged`) or the frame can be zero
   height, which hides static markup too. `body` carries an intrinsic `min-height` as a
   floor so a panel that fails can still display why.
