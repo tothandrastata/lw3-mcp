@@ -24,9 +24,15 @@ Prefer step-by-step pictures? See [WALKTHROUGH.md](WALKTHROUGH.md).
    **https://github.com/tothandrastata/lw3-mcp/releases/latest/download/lw3-mcp.mcpb**
 2. Open Claude Desktop → **Settings** → **Extensions**, under the
    **Desktop app** heading in the left sidebar.
-3. Drag the downloaded `lw3-mcp.mcpb` onto the line reading
-   **"Drag .MCPB or .DXT files here to install"**. If the drop does not
-   register, use **Advanced settings** just above it to install from a file.
+3. Click **Advanced settings** on that page and install the downloaded
+   `lw3-mcp.mcpb` from there.
+
+   You can also drag the file onto the line reading **"Drag .MCPB or .DXT files
+   here to install"**, but dragging is unreliable: if the drop misses that line
+   the file lands in the chat window behind the settings panel instead. It then
+   looks as though something happened when nothing was installed. If you see the
+   file appear in your conversation, that is what went wrong — close the panel,
+   delete it from the chat, and use **Advanced settings** instead.
 4. Confirm the install prompt.
 
 That link always serves the newest release. To pin a specific version instead,

@@ -57,20 +57,24 @@ heading and click **Extensions** underneath it.
 
 <div class="page-break"></div>
 
-## Step 3 — Drag the file in
+## Step 3 — Install the file
 
-The Extensions page has a line near the middle reading
-**"Drag .MCPB or .DXT files here to install"**. That is the target.
+**Click "Advanced settings"** on the Extensions page and install the downloaded
+`lw3-mcp.mcpb` from there. This is the reliable way.
 
-Open your Downloads folder next to the Claude Desktop window, then drag
-`lw3-mcp.mcpb` out of Downloads and drop it on that line.
+There is also a line on that page reading **"Drag .MCPB or .DXT files here to
+install"**, and you can drag the file onto it from your Downloads folder — but
+only if you are confident about the drop. If you miss that line, the file goes
+into the chat window behind the settings panel instead, and nothing is
+installed. See the warning below.
 
 <img src="assets/screenshots/04-drag.png" alt="Dragging the file from Explorer onto the Extensions pane" width="560">
 
-> **If nothing happens when you drop it**, click **Advanced settings** —
-> the button just above that line — and look there for the option to install
-> an extension from a file, then pick `lw3-mcp.mcpb` from your Downloads
-> folder instead.
+> **If the file appears in your chat instead of installing**, the drop missed
+> the panel. This is the common failure, and it is confusing because it looks
+> like something worked. Nothing was installed. Close the settings panel, delete
+> the file from the conversation, reopen Settings → Extensions, and use
+> **Advanced settings** instead.
 
 
 ## Step 4 — Configure permissions
