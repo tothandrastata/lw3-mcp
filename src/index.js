@@ -431,25 +431,55 @@ class LW3MCPServer {
     };
   }
 
+  /**
+   * What the MCP client declared about itself at initialize.
+   *
+   * Reported here rather than logged because some Claude Desktop builds write no
+   * MCP server logs at all, which makes stderr an unreadable channel. A tool
+   * response is the only place this is reliably visible.
+   *
+   * `clientInit` holds the raw initialize params rather than
+   * server.getClientCapabilities(), which exposes only params.capabilities — an
+   * extension advertised in a sibling field would be invisible to it.
+   */
+  describeClient() {
+    const params = this.clientInit;
+    if (!params) return 'Client: not recorded';
+
+    const client = params.clientInfo || {};
+    const name = [client.name, client.version].filter(Boolean).join(' ') || 'unnamed';
+    const declared = Object.keys(params.capabilities || {});
+
+    // The MCP Apps extension is advertised at initialize; the spec does not
+    // guarantee where, so search the whole params object rather than one field.
+    const raw = JSON.stringify(params);
+    const ui = raw.includes('modelcontextprotocol/ui')
+      ? 'yes'
+      : /"ui"\s*:/.test(raw)
+        ? 'possibly — a "ui" key is present, see raw below'
+        : 'no';
+
+    return [
+      `Client: ${name}`,
+      `Protocol: ${params.protocolVersion || 'unstated'}`,
+      `Capabilities: ${declared.length ? declared.join(', ') : 'none declared'}`,
+      `MCP Apps (io.modelcontextprotocol/ui): ${ui}`,
+      `Raw initialize params: ${raw}`,
+    ].join('\n');
+  }
+
   async handleStatus() {
     const info = this.lw3.getConnectionInfo();
 
-    if (!info) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: 'Status: Not connected',
-          },
-        ],
-      };
-    }
+    const device = info
+      ? `Status: Connected\nHost: ${info.host}\nPort: ${info.port}\nTransport: ${info.transport}`
+      : 'Status: Not connected';
 
     return {
       content: [
         {
           type: 'text',
-          text: `Status: Connected\nHost: ${info.host}\nPort: ${info.port}\nTransport: ${info.transport}`,
+          text: `${device}\n\n${this.describeClient()}`,
         },
       ],
     };
@@ -575,6 +605,25 @@ class LW3MCPServer {
 
   async run() {
     const transport = new StdioServerTransport();
+
+    // Record the client's initialize params so `status` can report which host we
+    // are talking to and what it supports. Installed as a property setter before
+    // connect() rather than wrapping transport.onmessage afterwards: connect()
+    // calls transport.start(), which begins reading stdin, so a wrap applied
+    // after it races the very first message — which is initialize, the only one
+    // this cares about.
+    let handler;
+    Object.defineProperty(transport, 'onmessage', {
+      configurable: true,
+      get: () => handler,
+      set: (fn) => {
+        handler = (message, extra) => {
+          if (message?.method === 'initialize') this.clientInit = message.params;
+          fn?.(message, extra);
+        };
+      },
+    });
+
     await this.server.connect(transport);
     console.error('MCP LW3 Gateway server running on stdio');
   }
