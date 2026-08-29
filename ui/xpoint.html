@@ -389,6 +389,39 @@ const app = new App({ name: 'lw3-xpoint', version: '1.0.0' });
 app.onerror = (err) => { console.error('[xpoint] app error:', err); };
 
 /**
+ * Breadcrumb to the HOST's console, not this frame's.
+ *
+ * A view that renders at zero height, or inside a frame nobody can select in
+ * devtools, is undebuggable from the inside. sendLog crosses back over the
+ * transport, so these lines land where they can actually be read. Never let a
+ * diagnostic break the thing it is diagnosing.
+ */
+function hostLog(message) {
+  try { app.sendLog({ level: 'info', data: '[xpoint] ' + message }); } catch (err) { /* ignore */ }
+}
+
+/**
+ * Tell the host how tall we are.
+ *
+ * The SDK reports size on its own, but an app that is invisible despite a
+ * successful handshake is the documented symptom of a zero-height frame, so
+ * this reports explicitly after every render and refuses to report a height
+ * so small that the panel could not be seen even if the host honoured it.
+ */
+const MIN_PANEL_HEIGHT = 240;
+function reportSize() {
+  try {
+    const width = Math.ceil(document.documentElement.scrollWidth) || 320;
+    const measured = Math.ceil(document.documentElement.scrollHeight);
+    const height = Math.max(measured, MIN_PANEL_HEIGHT);
+    app.sendSizeChanged({ width, height });
+    return { width, height, measured };
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
  * Call a tool on our own server and return its text content.
  *
  * Every tool handler in src/index.js reports its own errors as ordinary
@@ -568,6 +601,11 @@ async function refresh() {
     const grid = await fetchGrid();
     lastGrid = grid;
     render(grid);
+    const size = reportSize();
+    hostLog(
+      'rendered ' + grid.destinations.length + 'x' + grid.sources.length +
+      ' grid; size ' + JSON.stringify(size)
+    );
     setBanner(null);
     setStatus(`Updated ${new Date().toLocaleTimeString()}`);
   } catch (err) {
@@ -583,6 +621,9 @@ async function refresh() {
   setStatus('Connecting…');
   try {
     await app.connect();
+    hostLog('connect() resolved; host context: ' + JSON.stringify(app.getHostContext() || null));
+    const size = reportSize();
+    hostLog('initial size report: ' + JSON.stringify(size));
   } catch (err) {
     appEl.innerHTML =
       '<div class="empty-state">Could not connect to the host: ' +
