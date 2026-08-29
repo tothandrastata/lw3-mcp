@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video crosspoint</title>
+<style>
+  /*
+   * Self-contained styling only: no @import, no external fonts, no url()
+   * references. The host's CSP blocks anything this page would try to fetch,
+   * so every asset it needs has to already be inline here.
+   */
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b6b6b;
+    --border: #d8d8d8;
+    --header-bg: #f4f4f5;
+    --selected-bg: #2563eb;
+    --selected-fg: #ffffff;
+    --disabled-bg: #f2f2f2;
+    --disabled-fg: #9a9a9a;
+    --enabled-hover: #eef4ff;
+    --banner-bg: #fff4e5;
+    --banner-fg: #7a4a00;
+    --banner-border: #f0c98a;
+    --focus-ring: #2563eb;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1e1f22;
+      --fg: #e8e8ea;
+      --muted: #9a9aa2;
+      --border: #3a3b3f;
+      --header-bg: #2a2b2f;
+      --selected-bg: #3b82f6;
+      --selected-fg: #0b0d12;
+      --disabled-bg: #26272b;
+      --disabled-fg: #6a6b70;
+      --enabled-hover: #223049;
+      --banner-bg: #3a2c10;
+      --banner-fg: #f0c98a;
+      --banner-border: #5a4520;
+      --focus-ring: #6ea8ff;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 13px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+
+  #app { padding: 0.75rem; min-height: 7rem; box-sizing: border-box; }
+
+  .panel-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .panel-header h1 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0;
+  }
+
+  .status {
+    font-size: 0.75rem;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .banner {
+    margin: 0 0 0.5rem;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--banner-border);
+    background: var(--banner-bg);
+    color: var(--banner-fg);
+    border-radius: 4px;
+    font-size: 0.8rem;
+  }
+  .banner[hidden] { display: none; }
+
+  .empty-state {
+    padding: 1rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+
+  /* Dim the last-known grid rather than hide it, so a stale read still shows
+     the last thing that was actually true. */
+  #app.stale .table-wrap { opacity: 0.55; }
+
+  .table-wrap { overflow-x: auto; }
+
+  table {
+    border-collapse: collapse;
+    font-size: 0.8rem;
+  }
+
+  th, td {
+    border: 1px solid var(--border);
+    padding: 0.35rem 0.55rem;
+    text-align: center;
+  }
+
+  thead th {
+    background: var(--header-bg);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  tbody th {
+    background: var(--header-bg);
+    font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  th.corner { background: var(--bg); border: none; }
+
+  td.cell { min-width: 2.75rem; color: var(--disabled-fg); }
+
+  td.cell[data-dest] {
+    cursor: pointer;
+    color: var(--fg);
+  }
+  td.cell[data-dest]:hover { background: var(--enabled-hover); }
+  td.cell[data-dest]:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+  }
+
+  td.cell.disabled {
+    background: var(--disabled-bg);
+    color: var(--disabled-fg);
+    font-size: 0.72rem;
+  }
+
+  td.cell.selected {
+    background: var(--selected-bg);
+    color: var(--selected-fg);
+  }
+
+  .dot {
+    display: inline-block;
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: currentColor;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="panel-header">
+    <h1>Video crosspoint</h1>
+    <div id="status" class="status" aria-live="polite"></div>
+  </header>
+  <div id="banner" class="banner" role="alert" hidden></div>
+  <div class="table-wrap">
+    <table id="grid" aria-label="Video crosspoint routing"></table>
+  </div>
+</div>
+<script type="module">
+/* __MCP_APPS_SDK__ */
+
+'use strict';
+
+// ---------------------------------------------------------------------
+// Deliberate copy of src/xpoint.js.
+//
+// This iframe is sandboxed by the host and cannot import from the server's
+// filesystem, so buildGrid, cellState, and the private helpers/constants
+// they close over (parseProperty, asBool, byPortNumber, XP_NODE, VIDEO_NODE)
+// are pasted verbatim below rather than reimplemented. The only change from
+// src/xpoint.js is removing the `export` keywords, since this is a plain
+// script, not an ES module. If src/xpoint.js changes, this block must be
+// updated to match — the tests in tests/xpoint.test.js cover the original,
+// not this copy, so a silent divergence here would not be caught by them.
+// ---------------------------------------------------------------------
+
+const XP_NODE = '/V1/MEDIA/VIDEO/XP';
+const VIDEO_NODE = '/V1/MEDIA/VIDEO';
+
+/** The device reports booleans as the strings "true" and "false". */
+const asBool = (value) => value === 'true';
+
+/** `pw /path.Prop=value` -> { path, prop, value }; anything else -> null. */
+function parseProperty(line) {
+  const match = line.match(/^p[rw] (.+?)\.([^=]+)=(.*)$/);
+  return match ? { path: match[1], prop: match[2], value: match[3] } : null;
+}
+
+/** Inputs and outputs sort by their number, so I10 follows I2 rather than I1. */
+function byPortNumber(a, b) {
+  return Number(a.slice(1)) - Number(b.slice(1));
+}
+
+function buildGrid({ xpLines = [], videoLines = [], switchableLines = [] }) {
+  const ports = new Map(); // port -> { name, signalPresent }
+  const dest = new Map(); // port -> { connectedSource, locked }
+  const switchable = {};
+
+  // /V1/MEDIA/VIDEO/<port>.Name and .SignalPresent
+  for (const line of videoLines) {
+    const p = parseProperty(line);
+    if (!p) continue;
+    const port = p.path.startsWith(`${VIDEO_NODE}/`) ? p.path.slice(VIDEO_NODE.length + 1) : null;
+    if (!port || !/^[IO]\d+$/.test(port)) continue;
+    const entry = ports.get(port) || { name: null, signalPresent: null };
+    if (p.prop === 'Name') entry.name = p.value;
+    if (p.prop === 'SignalPresent') entry.signalPresent = asBool(p.value);
+    ports.set(port, entry);
+  }
+
+  // /V1/MEDIA/VIDEO/XP/<out>.ConnectedSource and .Lock
+  for (const line of xpLines) {
+    const p = parseProperty(line);
+    if (!p) continue;
+    const port = p.path.startsWith(`${XP_NODE}/`) ? p.path.slice(XP_NODE.length + 1) : null;
+    if (!port || !/^O\d+$/.test(port)) continue;
+    const entry = dest.get(port) || { connectedSource: null, locked: false };
+    if (p.prop === 'ConnectedSource') entry.connectedSource = p.value;
+    if (p.prop === 'Lock') entry.locked = asBool(p.value);
+    dest.set(port, entry);
+  }
+
+  // /V1/MEDIA/VIDEO/XP/<out>/SWITCHABLE.<src>=OK|Busy|...
+  for (const line of switchableLines) {
+    const p = parseProperty(line);
+    if (!p) continue;
+    const match = p.path.match(/\/XP\/(O\d+)\/SWITCHABLE$/);
+    if (!match) continue;
+    switchable[match[1]] = switchable[match[1]] || {};
+    switchable[match[1]][p.prop] = p.value;
+  }
+
+  const named = (port) => ({
+    port,
+    name: ports.get(port)?.name || port,
+    signalPresent: ports.get(port)?.signalPresent ?? null,
+  });
+
+  const inputs = [...ports.keys()].filter((p) => p.startsWith('I')).sort(byPortNumber);
+  // Every destination the device mentioned, whether via VIDEO or XP.
+  const outputs = [...new Set([...[...ports.keys()].filter((p) => p.startsWith('O')), ...dest.keys()])]
+    .sort(byPortNumber);
+
+  return {
+    // '0' is the device's own token for "disconnect this destination".
+    sources: [{ port: '0', name: 'Disconnect', signalPresent: null }, ...inputs.map(named)],
+    destinations: outputs.map((port) => ({
+      ...named(port),
+      connectedSource: dest.get(port)?.connectedSource ?? null,
+      locked: dest.get(port)?.locked ?? false,
+    })),
+    switchable,
+  };
+}
+
+/**
+ * What the view should draw for one cell.
+ *
+ * A cell is disabled when the destination is locked, or when the device does not
+ * report the source as OK for it. Absence of information counts as disabled:
+ * offering a click the device will refuse is worse than withholding one.
+ */
+function cellState(grid, destPort, srcPort) {
+  const destination = grid.destinations.find((d) => d.port === destPort);
+  const selected = destination?.connectedSource === srcPort;
+
+  if (!destination) return { selected: false, enabled: false, reason: 'Unknown destination' };
+  if (destination.locked) return { selected, enabled: false, reason: 'Locked' };
+
+  const status = grid.switchable[destPort]?.[srcPort];
+  if (status === undefined) return { selected, enabled: false, reason: 'Unavailable' };
+  if (status !== 'OK') return { selected, enabled: false, reason: status };
+
+  return { selected, enabled: true, reason: null };
+}
+
+// ---------------------------------------------------------------------
+// End of the copied block.
+// ---------------------------------------------------------------------
+
+// ---------------------------------------------------------------------
+// MCP Apps transport. The official SDK is inlined directly above this by
+// scripts/build-panel.js. App.connect() owns the ui/initialize handshake,
+// the initialized notification, and the size reporting the host needs to
+// give this frame a height. All three were hand-rolled here before, and
+// all three were places to get the wire format subtly wrong.
+// ---------------------------------------------------------------------
+
+const POLL_MS = 3000;
+
+const app = new App({ name: 'lw3-xpoint', version: '1.0.0' });
+
+// Registered before connect(): the SDK does not deliver events to handlers
+// attached afterwards.
+app.onerror = (err) => { console.error('[xpoint] app error:', err); };
+
+/**
+ * Call a tool on our own server and return its text content.
+ *
+ * Every tool handler in src/index.js reports its own errors as ordinary
+ * text content prefixed "Error: " rather than the isError flag (see the
+ * catch block in the CallToolRequestSchema handler), so that prefix is
+ * this view's only signal that a call failed.
+ */
+async function callTool(name, args) {
+  const result = await app.callServerTool({ name, arguments: args || {} });
+  const text = result && result.content && result.content[0] && result.content[0].text;
+  if (typeof text !== 'string') throw new Error(`Tool "${name}" returned no text content`);
+  if (text.startsWith('Error: ')) throw new Error(text.slice('Error: '.length));
+  return text;
+}
+
+/**
+ * The GETALL *tool* returns parsed JSON ({properties, nodes, methods}), but
+ * buildGrid expects the raw `pr`/`pw`/`n-` lines the device itself sends.
+ * Reconstructing them here — rather than changing buildGrid — is what
+ * keeps the copied logic above byte-identical to src/xpoint.js.
+ */
+function linesFromGetAll(jsonText) {
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (err) {
+    throw new Error(`GETALL did not return the expected JSON: ${err.message}`);
+  }
+  const properties = (parsed.properties || []).map(
+    (p) => `${p.writable ? 'pw' : 'pr'} ${p.nodepath}.${p.property}=${p.value}`
+  );
+  const nodes = (parsed.nodes || []).map((n) => `n- ${n}`);
+  return properties.concat(nodes);
+}
+
+// ---------------------------------------------------------------------
+// Reading the device: three-or-more GETALL calls per refresh.
+// ---------------------------------------------------------------------
+
+async function fetchGrid() {
+  const xpLines = linesFromGetAll(await callTool('GETALL', { path: `${XP_NODE}/*` }));
+  const videoLines = linesFromGetAll(await callTool('GETALL', { path: `${VIDEO_NODE}/*` }));
+
+  // Same pattern src/index.js uses to enumerate destinations before
+  // reading each one's SWITCHABLE child: derived from what XP actually
+  // reported, not assumed from VIDEO or hardcoded.
+  const destinations = [...new Set(
+    xpLines.map((l) => {
+      const m = l.match(/\/XP\/(O\d+)[./]/);
+      return m ? m[1] : null;
+    }).filter(Boolean)
+  )];
+
+  const switchableLines = [];
+  for (const port of destinations) {
+    try {
+      switchableLines.push(...linesFromGetAll(await callTool('GETALL', { path: `${XP_NODE}/${port}/SWITCHABLE` })));
+    } catch (err) {
+      // Switchability is read per destination and must never be inferred
+      // or predicted for one that failed to answer. A read failure here
+      // leaves that destination's cells "Unavailable" (buildGrid's
+      // default for absent data) rather than aborting the whole refresh
+      // over routing and names that were already read successfully.
+      console.error(`[xpoint-ui] SWITCHABLE read failed for ${port}:`, err.message);
+    }
+  }
+
+  return buildGrid({ xpLines, videoLines, switchableLines });
+}
+
+// ---------------------------------------------------------------------
+// Rendering and interaction.
+// ---------------------------------------------------------------------
+
+const gridEl = document.getElementById('grid');
+const bannerEl = document.getElementById('banner');
+const statusEl = document.getElementById('status');
+const appEl = document.getElementById('app');
+
+let lastGrid = null;
+let busy = false;
+let polling = false;
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+function setBanner(message, { stale = false } = {}) {
+  if (!message) {
+    bannerEl.hidden = true;
+    bannerEl.textContent = '';
+    appEl.classList.remove('stale');
+    return;
+  }
+  bannerEl.hidden = false;
+  bannerEl.textContent = message;
+  appEl.classList.toggle('stale', stale);
+}
+
+function setStatus(text) {
+  statusEl.textContent = text;
+}
+
+function render(grid) {
+  if (!grid || grid.destinations.length === 0) {
+    gridEl.innerHTML = '';
+    setBanner('No video crosspoint destinations were reported.', { stale: false });
+    return;
+  }
+
+  const headerCells = grid.sources.map((s) => `<th scope="col">${escapeHtml(s.name)}</th>`).join('');
+  const thead = `<thead><tr><th scope="col" class="corner"></th>${headerCells}</tr></thead>`;
+
+  const rows = grid.destinations.map((d) => {
+    const cells = grid.sources.map((s) => {
+      const state = cellState(grid, d.port, s.port);
+      const classes = ['cell'];
+      if (state.selected) classes.push('selected');
+      if (!state.enabled) classes.push('disabled');
+
+      const clickable = state.enabled && !state.selected;
+      const attrs = clickable
+        ? ` data-dest="${escapeHtml(d.port)}" data-src="${escapeHtml(s.port)}" role="button" tabindex="0"`
+        : '';
+      const title = state.reason ? ` title="${escapeHtml(state.reason)}"` : '';
+
+      let label = '';
+      if (state.selected) label = '<span class="dot" aria-hidden="true"></span>';
+      else if (!state.enabled && state.reason) label = escapeHtml(state.reason);
+
+      return `<td class="${classes.join(' ')}"${title}${attrs}>${label}</td>`;
+    }).join('');
+    return `<tr><th scope="row">${escapeHtml(d.name)}</th>${cells}</tr>`;
+  }).join('');
+
+  gridEl.innerHTML = `${thead}<tbody>${rows}</tbody>`;
+}
+
+async function switchRoute(destPort, srcPort) {
+  if (busy) return;
+  busy = true;
+  try {
+    await callTool('SET', {
+      nodepath: `${XP_NODE}/${destPort}`,
+      property: 'ConnectedSource',
+      value: srcPort,
+    });
+    // A switch can change which sources are Busy at *other* destinations
+    // (e.g. two outputs sharing one input on the crosspoint chip), so the
+    // refresh after a switch must re-read SWITCHABLE, not just routing.
+    await refresh();
+  } catch (err) {
+    setBanner(err.message, { stale: true });
+  } finally {
+    busy = false;
+  }
+}
+
+gridEl.addEventListener('click', (event) => {
+  const td = event.target.closest('td[data-dest]');
+  if (!td) return;
+  switchRoute(td.dataset.dest, td.dataset.src);
+});
+
+gridEl.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  const td = event.target.closest('td[data-dest]');
+  if (!td) return;
+  event.preventDefault();
+  switchRoute(td.dataset.dest, td.dataset.src);
+});
+
+async function refresh() {
+  try {
+    const grid = await fetchGrid();
+    lastGrid = grid;
+    render(grid);
+    setBanner(null);
+    setStatus(`Updated ${new Date().toLocaleTimeString()}`);
+  } catch (err) {
+    // Keep whatever was last drawn — a blank panel reads as "nothing is
+    // routed", which is a stronger and different claim than "the last
+    // read failed".
+    if (lastGrid) render(lastGrid);
+    setBanner(err.message, { stale: true });
+  }
+}
+
+(async function main() {
+  setStatus('Connecting…');
+  try {
+    await app.connect();
+  } catch (err) {
+    appEl.innerHTML =
+      '<div class="empty-state">Could not connect to the host: ' +
+      escapeHtml(err.message) + '</div>';
+    return;
+  }
+
+  await refresh();
+  setInterval(() => {
+    // switchRoute's own `await refresh()` is deliberately not gated by this:
+    // the post-switch re-read must always happen.
+    if (document.hidden || busy || polling) return;
+    polling = true;
+    refresh().finally(() => { polling = false; });
+  }, POLL_MS);
+})();
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 {
   "name": "lw3-mcp",
-  "version": "1.6.2",
+  "version": "1.7.0",
   "description": "MCP server gateway for Lightware devices using LW3 protocol",
   "type": "module",
   "main": "src/index.js",
@@ -11,7 +11,8 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "test": "node --test tests/*.js",
-    "bundle": "node scripts/bundle.js"
+    "bundle": "node scripts/build-panel.js && node scripts/bundle.js",
+    "build:panel": "node scripts/build-panel.js"
   },
   "keywords": [
     "mcp",
@@ -25,5 +26,8 @@
     "@modelcontextprotocol/sdk": "^1.0.4",
     "multicast-dns": "^7.2.5",
     "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.7.5"
   }
 }

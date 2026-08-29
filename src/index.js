@@ -29,7 +29,7 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '1.6.2',
+        version: '1.7.0',
       },
       {
         capabilities: {
@@ -638,6 +638,10 @@ class LW3MCPServer {
 
     return {
       content: [{ type: 'text', text }],
+      // The panel hydrates from this instead of waiting on its first poll.
+      // Per the MCP Apps spec structuredContent is not added to the model's
+      // context, so this costs the conversation nothing.
+      structuredContent: grid,
       _meta: { ui: { resourceUri: XPOINT_UI } },
     };
   }
