@@ -66,6 +66,22 @@
      transport, so it shows even when everything after it fails. Temporary:
      remove once the panel is confirmed working. */
   #stage[hidden] { display: none; }
+
+  #auth[hidden] { display: none; }
+  #auth {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 0.6rem 0.75rem;
+    margin: 0 0 0.75rem;
+    border: 1px solid var(--banner-border);
+    background: var(--banner-bg);
+    color: var(--banner-fg);
+    border-radius: 4px;
+  }
+  #auth input { flex: 1 1 8rem; min-width: 6rem; padding: 0.25rem 0.4rem; }
+  #auth button { padding: 0.25rem 0.7rem; cursor: pointer; }
   #stage {
     background: #b00020;
     color: #ffffff;
@@ -194,6 +210,11 @@
     <div id="status" class="status" aria-live="polite"></div>
   </header>
   <div id="banner" class="banner" role="alert" hidden></div>
+  <form id="auth" hidden>
+    <label for="auth-password">Device admin password:</label>
+    <input id="auth-password" type="password" autocomplete="current-password">
+    <button type="submit">Connect and switch</button>
+  </form>
   <div class="table-wrap">
     <table id="grid" aria-label="Video crosspoint routing"></table>
   </div>
@@ -388,6 +409,8 @@ function stage(text) {
   } catch (err) { /* never let the reporter break the thing it reports on */ }
 }
 
+const authEl = document.getElementById('auth');
+const passwordEl = document.getElementById('auth-password');
 const gridEl = document.getElementById('grid');
 const bannerEl = document.getElementById('banner');
 const statusEl = document.getElementById('status');
@@ -399,6 +422,11 @@ let hydrated = false;
 // instance a connection so clicks can switch directly.
 let connection = null;
 let selfConnected = false;
+// Held in memory for this panel only. Never persisted, never logged, and never
+// put in structuredContent -- that is visible in the conversation's raw tool
+// output view.
+let devicePassword = null;
+let pendingSwitch = null;
 let busy = false;
 let polling = false;
 
@@ -481,7 +509,9 @@ function labelFor(list, port) {
 async function connectSelf() {
   if (selfConnected) return true;
   if (!connection || !connection.host) return false;
-  await callTool('connect', { host: connection.host, port: connection.port });
+  const args = { host: connection.host, port: connection.port };
+  if (devicePassword) args.password = devicePassword;
+  await callTool('connect', args);
   selfConnected = true;
   return true;
 }
@@ -536,6 +566,20 @@ async function switchRoute(destPort, srcPort) {
       await applySwitch();
     }
   } catch (directError) {
+    // The device wants an admin password and this panel's connection has none.
+    // Asking for it here is what makes a click switch: the fallback below only
+    // stages text the user must then accept and send themselves.
+    if (/requires authentication|rejected that password/i.test(directError.message)) {
+      pendingSwitch = { destPort, srcPort };
+      setStatus(`${destLabel} → ${srcLabel} needs the device password`);
+      setBanner(directError.message, { stale: false });
+      authEl.hidden = false;
+      passwordEl.focus();
+      reportSize();
+      busy = false;
+      return;
+    }
+
     setStatus(`Asking Claude to switch ${destLabel}…`);
     try {
       // Port codes as well as names: the model needs the exact SET values,
@@ -569,6 +613,22 @@ async function switchRoute(destPort, srcPort) {
     busy = false;
   }
 }
+
+authEl.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const entered = passwordEl.value;
+  if (!entered) return;
+
+  devicePassword = entered;
+  passwordEl.value = '';
+  authEl.hidden = true;
+  setBanner(null);
+  reportSize();
+
+  const retry = pendingSwitch;
+  pendingSwitch = null;
+  if (retry) switchRoute(retry.destPort, retry.srcPort);
+});
 
 gridEl.addEventListener('click', (event) => {
   const td = event.target.closest('td[data-dest]');
