@@ -743,20 +743,40 @@ The script must:
 
 Use the repository's existing voice in comments: explain why, not what.
 
-**Why this step gives requirements rather than code, unlike every other step in this plan.** The
-panel's transport calls — how the iframe establishes its MCP client connection over `postMessage`,
-and the exact shape of a tool call from inside a view — are defined by the MCP Apps extension, and I
-have not written or run code against it. Inventing that API here would produce plausible code that
-does not work, and it would be indistinguishable from the verified code everywhere else in this
-plan.
+**The transport, taken from the extension specification** (`ext-apps`, `2026-01-26`). All messages
+go through `window.parent.postMessage(msg, '*')` and arrive on `window.addEventListener('message', …)`,
+carrying JSON-RPC 2.0.
 
-So: write those calls against the extension specification at
-`https://github.com/modelcontextprotocol/ext-apps` as you implement, and treat the seven numbered
-requirements above as the contract the file must satisfy. If the spec's transport differs from what
-this plan assumes, follow the spec and note the difference in your report.
+Handshake, in order:
+
+1. The view sends an `ui/initialize` **request**:
+   ```json
+   { "jsonrpc": "2.0", "id": 1, "method": "ui/initialize",
+     "params": { "capabilities": {}, "clientInfo": { "name": "lw3-xpoint", "version": "1.0.0" },
+                 "protocolVersion": "2026-01-26" } }
+   ```
+2. The host replies with `result` carrying `protocolVersion`, `hostCapabilities`, `hostInfo`, `hostContext`.
+3. The view sends `{"jsonrpc":"2.0","method":"ui/notifications/initialized","params":{}}`.
+4. The host may send `ui/notifications/tool-input` with the arguments the tool was called with. The
+   spec says a view must receive this **after its initialize completes** before calling tools.
+
+Calling a tool from the view is an ordinary MCP request over the same channel:
+
+```json
+{ "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+  "params": { "name": "GETALL", "arguments": { "path": "/V1/MEDIA/VIDEO/XP/*" } } }
+```
+
+and the host answers with `result.content[0].text`.
+
+Note this project's `GETALL` tool returns **JSON** (`{properties, nodes, methods}`), not raw lines,
+while `buildGrid` takes raw lines. Reconcile that inside the view: either reconstruct the lines from
+the parsed JSON, or call the tool and map its structured output onto the same shape. Whichever you
+choose, keep `buildGrid` and `cellState` byte-identical to `src/xpoint.js` so the tested logic and
+the rendered logic cannot diverge — and say in a comment that they are a deliberate copy.
 
 Everything the panel does *with* the data — the model, the cell rules, the ordering — is already
-written and tested in `src/xpoint.js`. This step is markup plus a transport binding.
+written and tested in `src/xpoint.js`. This step is markup plus the transport binding above.
 
 - [ ] **Step 4: Keep the panel in the bundle**
 
