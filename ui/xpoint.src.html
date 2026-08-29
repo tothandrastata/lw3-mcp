@@ -204,121 +204,17 @@
 'use strict';
 
 // ---------------------------------------------------------------------
-// Deliberate copy of src/xpoint.js.
+// src/xpoint.js, injected verbatim by scripts/build-panel.js.
 //
-// This iframe is sandboxed by the host and cannot import from the server's
-// filesystem, so buildGrid, cellState, and the private helpers/constants
-// they close over (parseProperty, asBool, byPortNumber, XP_NODE, VIDEO_NODE)
-// are pasted verbatim below rather than reimplemented. The only change from
-// src/xpoint.js is removing the `export` keywords, since this is a plain
-// script, not an ES module. If src/xpoint.js changes, this block must be
-// updated to match — the tests in tests/xpoint.test.js cover the original,
-// not this copy, so a silent divergence here would not be caught by them.
+// This iframe is sandboxed and cannot import from the server's filesystem, so
+// the grid model has to live inside this document. It used to be pasted here by
+// hand, under a comment warning that the copy must be kept in step. It was not:
+// a cellState fix landed in the module only, and the panel went on marking every
+// cell Unavailable while tests covering the module passed. Generating the copy
+// removes the possibility.
 // ---------------------------------------------------------------------
 
-const XP_NODE = '/V1/MEDIA/VIDEO/XP';
-const VIDEO_NODE = '/V1/MEDIA/VIDEO';
-
-/** The device reports booleans as the strings "true" and "false". */
-const asBool = (value) => value === 'true';
-
-/** `pw /path.Prop=value` -> { path, prop, value }; anything else -> null. */
-function parseProperty(line) {
-  const match = line.match(/^p[rw] (.+?)\.([^=]+)=(.*)$/);
-  return match ? { path: match[1], prop: match[2], value: match[3] } : null;
-}
-
-/** Inputs and outputs sort by their number, so I10 follows I2 rather than I1. */
-function byPortNumber(a, b) {
-  return Number(a.slice(1)) - Number(b.slice(1));
-}
-
-function buildGrid({ xpLines = [], videoLines = [], switchableLines = [] }) {
-  const ports = new Map(); // port -> { name, signalPresent }
-  const dest = new Map(); // port -> { connectedSource, locked }
-  const switchable = {};
-
-  // /V1/MEDIA/VIDEO/<port>.Name and .SignalPresent
-  for (const line of videoLines) {
-    const p = parseProperty(line);
-    if (!p) continue;
-    const port = p.path.startsWith(`${VIDEO_NODE}/`) ? p.path.slice(VIDEO_NODE.length + 1) : null;
-    if (!port || !/^[IO]\d+$/.test(port)) continue;
-    const entry = ports.get(port) || { name: null, signalPresent: null };
-    if (p.prop === 'Name') entry.name = p.value;
-    if (p.prop === 'SignalPresent') entry.signalPresent = asBool(p.value);
-    ports.set(port, entry);
-  }
-
-  // /V1/MEDIA/VIDEO/XP/<out>.ConnectedSource and .Lock
-  for (const line of xpLines) {
-    const p = parseProperty(line);
-    if (!p) continue;
-    const port = p.path.startsWith(`${XP_NODE}/`) ? p.path.slice(XP_NODE.length + 1) : null;
-    if (!port || !/^O\d+$/.test(port)) continue;
-    const entry = dest.get(port) || { connectedSource: null, locked: false };
-    if (p.prop === 'ConnectedSource') entry.connectedSource = p.value;
-    if (p.prop === 'Lock') entry.locked = asBool(p.value);
-    dest.set(port, entry);
-  }
-
-  // /V1/MEDIA/VIDEO/XP/<out>/SWITCHABLE.<src>=OK|Busy|...
-  for (const line of switchableLines) {
-    const p = parseProperty(line);
-    if (!p) continue;
-    const match = p.path.match(/\/XP\/(O\d+)\/SWITCHABLE$/);
-    if (!match) continue;
-    switchable[match[1]] = switchable[match[1]] || {};
-    switchable[match[1]][p.prop] = p.value;
-  }
-
-  const named = (port) => ({
-    port,
-    name: ports.get(port)?.name || port,
-    signalPresent: ports.get(port)?.signalPresent ?? null,
-  });
-
-  const inputs = [...ports.keys()].filter((p) => p.startsWith('I')).sort(byPortNumber);
-  // Every destination the device mentioned, whether via VIDEO or XP.
-  const outputs = [...new Set([...[...ports.keys()].filter((p) => p.startsWith('O')), ...dest.keys()])]
-    .sort(byPortNumber);
-
-  return {
-    // '0' is the device's own token for "disconnect this destination".
-    sources: [{ port: '0', name: 'Disconnect', signalPresent: null }, ...inputs.map(named)],
-    destinations: outputs.map((port) => ({
-      ...named(port),
-      connectedSource: dest.get(port)?.connectedSource ?? null,
-      locked: dest.get(port)?.locked ?? false,
-    })),
-    switchable,
-  };
-}
-
-/**
- * What the view should draw for one cell.
- *
- * A cell is disabled when the destination is locked, or when the device does not
- * report the source as OK for it. Absence of information counts as disabled:
- * offering a click the device will refuse is worse than withholding one.
- */
-function cellState(grid, destPort, srcPort) {
-  const destination = grid.destinations.find((d) => d.port === destPort);
-  const selected = destination?.connectedSource === srcPort;
-
-  if (!destination) return { selected: false, enabled: false, reason: 'Unknown destination' };
-  if (destination.locked) return { selected, enabled: false, reason: 'Locked' };
-
-  const status = grid.switchable[destPort]?.[srcPort];
-  if (status === undefined) return { selected, enabled: false, reason: 'Unavailable' };
-  if (status !== 'OK') return { selected, enabled: false, reason: status };
-
-  return { selected, enabled: true, reason: null };
-}
-
-// ---------------------------------------------------------------------
-// End of the copied block.
-// ---------------------------------------------------------------------
+/* __XPOINT_MODEL__ */
 
 // ---------------------------------------------------------------------
 // MCP Apps transport. The official SDK is inlined directly above this by

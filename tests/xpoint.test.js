@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { buildGrid, cellState, renderGridText, XP_NODE, VIDEO_NODE } from '../src/xpoint.js';
 
 // Captured verbatim from a UCX-4x2-HC30 on 2026-08-28.
@@ -287,4 +288,32 @@ test('a destination that published switchability still has absent sources blocke
 
   assert.equal(cellState(g, 'O1', 'I2').enabled, false);
   assert.equal(cellState(g, 'O1', 'I2').reason, 'Unavailable');
+});
+
+test('the panel embeds the tested model verbatim, not a hand-kept copy', () => {
+  // ui/xpoint.html is generated: scripts/build-panel.js injects src/xpoint.js
+  // into it. This used to be a copy-paste, under a comment asking the next
+  // editor to keep it in step, and it silently fell behind -- a cellState fix
+  // landed in the module while the panel went on using the old logic, with
+  // every test here passing because they only ever exercised the module.
+  const model = readFileSync(new URL('../src/xpoint.js', import.meta.url), 'utf8');
+  const panel = readFileSync(new URL('../ui/xpoint.html', import.meta.url), 'utf8');
+
+  const bodyOf = (source, name) => {
+    const at = source.indexOf(`function ${name}(`);
+    assert.ok(at >= 0, `${name} not found`);
+    let depth = 0;
+    for (let i = source.indexOf('{', at); i < source.length; i++) {
+      if (source[i] === '{') depth++;
+      else if (source[i] === '}' && --depth === 0) {
+        return source.slice(at, i + 1).replace(/\r\n/g, '\n').trim();
+      }
+    }
+    throw new Error(`unbalanced ${name}`);
+  };
+
+  for (const fn of ['buildGrid', 'cellState', 'renderGridText']) {
+    assert.equal(bodyOf(panel, fn), bodyOf(model, fn),
+      `${fn} in the built panel differs from src/xpoint.js — rebuild with npm run build:panel`);
+  }
 });

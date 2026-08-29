@@ -285,17 +285,20 @@ const App = eI;
 'use strict';
 
 // ---------------------------------------------------------------------
-// Deliberate copy of src/xpoint.js.
+// src/xpoint.js, injected verbatim by scripts/build-panel.js.
 //
-// This iframe is sandboxed by the host and cannot import from the server's
-// filesystem, so buildGrid, cellState, and the private helpers/constants
-// they close over (parseProperty, asBool, byPortNumber, XP_NODE, VIDEO_NODE)
-// are pasted verbatim below rather than reimplemented. The only change from
-// src/xpoint.js is removing the `export` keywords, since this is a plain
-// script, not an ES module. If src/xpoint.js changes, this block must be
-// updated to match — the tests in tests/xpoint.test.js cover the original,
-// not this copy, so a silent divergence here would not be caught by them.
+// This iframe is sandboxed and cannot import from the server's filesystem, so
+// the grid model has to live inside this document. It used to be pasted here by
+// hand, under a comment warning that the copy must be kept in step. It was not:
+// a cellState fix landed in the module only, and the panel went on marking every
+// cell Unavailable while tests covering the module passed. Generating the copy
+// removes the possibility.
 // ---------------------------------------------------------------------
+
+/**
+ * Turns LW3 GETALL output into a video crosspoint grid, and answers what state
+ * each cell is in. Pure — no protocol, no sockets, no rendering beyond text.
+ */
 
 const XP_NODE = '/V1/MEDIA/VIDEO/XP';
 const VIDEO_NODE = '/V1/MEDIA/VIDEO';
@@ -390,16 +393,88 @@ function cellState(grid, destPort, srcPort) {
   if (!destination) return { selected: false, enabled: false, reason: 'Unknown destination' };
   if (destination.locked) return { selected, enabled: false, reason: 'Locked' };
 
-  const status = grid.switchable[destPort]?.[srcPort];
+  const published = grid.switchable[destPort];
+
+  // No SWITCHABLE data for this destination at all -- the node was unreadable, or
+  // the device does not implement it (the Taurus emulator does not). That is not
+  // the device refusing a switch, it is the device publishing no restrictions, so
+  // blocking every source would invent a rule rather than honour one. A switch the
+  // device will not accept still fails visibly at the SET.
+  //
+  // Distinct from a destination that DID publish switchability without mentioning
+  // this source: there the device has spoken, and we honour it.
+  if (published === undefined) return { selected, enabled: true, reason: null };
+
+  const status = published[srcPort];
   if (status === undefined) return { selected, enabled: false, reason: 'Unavailable' };
   if (status !== 'OK') return { selected, enabled: false, reason: status };
 
   return { selected, enabled: true, reason: null };
 }
 
-// ---------------------------------------------------------------------
-// End of the copied block.
-// ---------------------------------------------------------------------
+/** The same grid as text, for hosts that cannot render the panel. */
+function renderGridText(grid) {
+  if (grid.destinations.length === 0) return 'No video crosspoint destinations were reported.';
+
+  const lines = grid.destinations.map((d) => {
+    const source = grid.sources.find((s) => s.port === d.connectedSource);
+    const from = d.connectedSource ? `${source?.name || d.connectedSource}` : 'nothing';
+    // signalPresent is `null` when the device never reported it, deliberately kept
+    // distinct in buildGrid from `false` (device explicitly said no signal). Folding
+    // both into "no signal" would tell the reader a definite negative about a line
+    // that was simply never read.
+    const signal =
+      d.signalPresent === true ? 'signal' : d.signalPresent === false ? 'no signal' : 'signal not reported';
+    const flags = [d.locked ? 'locked' : null, signal].filter(Boolean).join(', ');
+    return `  ${d.name} <- ${from}  (${flags})`;
+  });
+
+  const canSwitch = [];
+  const blocked = [];
+  const unread = [];
+
+  for (const d of grid.destinations) {
+    if (d.locked) {
+      // Every cell of a locked destination carries the same reason; say it once
+      // instead of once per source.
+      blocked.push(`  ${d.name}: locked`);
+      continue;
+    }
+
+    // Compute each cell's state exactly once and reuse it for both lists below.
+    const cells = grid.sources.map((s) => ({ source: s, state: cellState(grid, d.port, s.port) }));
+
+    const available = cells
+      .filter(({ state }) => state.enabled && !state.selected)
+      .map(({ source }) => source.name);
+    if (available.length) {
+      canSwitch.push(`  ${d.name} can switch to: ${available.join(', ')}`);
+    }
+
+      // A destination that published no switchability at all. Its cells are
+      // enabled -- the device stated no restriction, so we invent none -- but the
+      // reader still needs telling that nothing was read, which is a different
+      // fact from the device having answered 'OK'. Reported once per destination
+      // here rather than once per source.
+      if (grid.switchable[d.port] === undefined) {
+        unread.push(d.name);
+      }
+
+    for (const { source, state } of cells) {
+      if (state.enabled || state.selected || state.reason === 'Unavailable') continue;
+      blocked.push(`  ${d.name} <- ${source.name}: ${state.reason}`);
+    }
+  }
+
+  const sections = ['Current routing:', ...lines];
+
+  if (canSwitch.length) sections.push('', 'Can switch to:', ...canSwitch);
+  if (blocked.length) sections.push('', 'Not currently switchable:', ...blocked);
+  if (unread.length) sections.push('', `Switchability could not be read for: ${unread.join(', ')}`);
+
+  return sections.join('\n');
+}
+
 
 // ---------------------------------------------------------------------
 // MCP Apps transport. The official SDK is inlined directly above this by

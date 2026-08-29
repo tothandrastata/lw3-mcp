@@ -109,6 +109,14 @@ design, none of them documented upstream; all were established the hard way in t
   height, which hides static markup too. `body` carries an intrinsic `min-height` as a
   floor so a panel that fails can still display why.
 
+`ui/xpoint.html` is **generated** — `npm run build:panel` injects `src/xpoint.js` and the
+ext-apps SDK into `ui/xpoint.src.html`. Edit the source template, never the output. The
+grid model used to be pasted into the panel by hand under a comment asking the next
+editor to keep it in step; it fell behind exactly as that comment feared, and the panel
+marked every cell `Unavailable` while every test passed, because the tests only ever
+exercised the module. `tests/xpoint.test.js` now compares the built panel's `buildGrid`,
+`cellState` and `renderGridText` against the module byte for byte.
+
 `uiprobe` is kept deliberately: a dependency-free panel that renders a fixed red box and
 reports its handshake separately from its static HTML. It is the only way to tell "this
 host does not render MCP Apps" from "our panel is broken", and it settled that question

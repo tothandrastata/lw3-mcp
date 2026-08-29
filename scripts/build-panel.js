@@ -26,6 +26,8 @@ const PANELS = [
   { src: join(ROOT, 'ui/probe.src.html'), out: join(ROOT, 'ui/probe.html') },
 ];
 const PLACEHOLDER = '/* __MCP_APPS_SDK__ */';
+const MODEL = join(ROOT, 'src/xpoint.js');
+const MODEL_PLACEHOLDER = '/* __XPOINT_MODEL__ */';
 
 /** Names the panel needs out of the SDK bundle. */
 const WANTED = ['App'];
@@ -72,6 +74,14 @@ for (const { src: srcPath, out, padTo } of PANELS) {
     throw new Error(`${srcPath} is missing the ${PLACEHOLDER} marker`);
   }
   let html = src.replace(PLACEHOLDER, () => inlined);
+
+  // The grid model, straight from the tested module. Only the export keywords
+  // go: the iframe runs this as one document, not as an ES module. Anything
+  // else that differs between the two copies is a divergence waiting to happen.
+  if (html.includes(MODEL_PLACEHOLDER)) {
+    const model = readFileSync(MODEL, 'utf8').replace(/^export /gm, '');
+    html = html.replace(MODEL_PLACEHOLDER, () => model);
+  }
   if (padTo && html.length < padTo) {
     // An HTML comment of X's: inert, and the SDK bundle provably contains no
     // "-->" that could close it early (checked before inlining was adopted).
