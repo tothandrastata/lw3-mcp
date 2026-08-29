@@ -297,6 +297,7 @@ function cellState(grid, destPort, srcPort) {
 
 const PROTOCOL_VERSION = '2026-01-26';
 const INIT_TIMEOUT_MS = 8000;
+const REQUEST_TIMEOUT_MS = 10000;
 const POLL_MS = 3000;
 
 let msgId = 0;
@@ -310,7 +311,16 @@ function post(message) {
 function request(method, params) {
   const id = ++msgId;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
+    // A host that never answers would otherwise leave this promise pending
+    // forever, and switchRoute would hold `busy` true — killing clicking and
+    // polling alike with no banner to say why. Timing out routes every such
+    // hang into the error handling that already exists.
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error(`The host did not answer "${method}" within ${REQUEST_TIMEOUT_MS / 1000}s`));
+    }, REQUEST_TIMEOUT_MS);
+    const settle = (fn) => (arg) => { clearTimeout(timer); fn(arg); };
+    pending.set(id, { resolve: settle(resolve), reject: settle(reject) });
     post({ jsonrpc: '2.0', id, method, params });
   });
 }
@@ -321,6 +331,10 @@ function notify(method, params) {
 }
 
 window.addEventListener('message', (event) => {
+  // The host is the parent frame. Its origin is not knowable here, so the
+  // send side must use '*', but the receive side can still refuse anything
+  // posted by some other frame or worker.
+  if (event.source !== window.parent) return;
   const msg = event.data;
   if (!msg || msg.jsonrpc !== '2.0') return;
 
@@ -422,6 +436,7 @@ const appEl = document.getElementById('app');
 
 let lastGrid = null;
 let busy = false;
+let polling = false;
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (c) => ({
@@ -561,8 +576,11 @@ async function initHandshake() {
 
   await refresh();
   setInterval(() => {
-    if (document.hidden || busy) return;
-    refresh();
+    // switchRoute's own `await refresh()` is deliberately not gated by this:
+    // the post-switch re-read must always happen.
+    if (document.hidden || busy || polling) return;
+    polling = true;
+    refresh().finally(() => { polling = false; });
   }, POLL_MS);
 })();
 </script>
