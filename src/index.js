@@ -46,7 +46,7 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '1.7.8',
+        version: '1.7.9',
       },
       {
         capabilities: {

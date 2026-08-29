@@ -65,6 +65,7 @@
      render. It owes nothing to the theme variables, the host's sizing or the
      transport, so it shows even when everything after it fails. Temporary:
      remove once the panel is confirmed working. */
+  #stage[hidden] { display: none; }
   #stage {
     background: #b00020;
     color: #ffffff;
@@ -177,7 +178,7 @@
 </head>
 <body>
 <div id="app">
-  <div id="stage">stage: static HTML rendered (JavaScript has not run)</div>
+  <div id="stage" hidden></div>
   <header class="panel-header">
     <h1>Video crosspoint</h1>
     <div id="status" class="status" aria-live="polite"></div>
@@ -341,7 +342,7 @@ app.ontoolresult = (result) => {
     render(grid);
     setBanner(null);
     setStatus('Updated ' + new Date().toLocaleTimeString());
-    stage('rendered ' + grid.destinations.length + ' x ' + grid.sources.length + ' grid from tool result');
+    stage(null);
     reportSize();
   } catch (err) {
     stage('tool-result render FAILED: ' + (err && err.message ? err.message : String(err)));
@@ -470,7 +471,13 @@ async function fetchGrid() {
 function stage(text) {
   try {
     const el = document.getElementById('stage');
-    if (el) el.textContent = 'stage: ' + text;
+    if (!el) return;
+    if (text === null) {
+      el.hidden = true;
+      return;
+    }
+    el.textContent = text;
+    el.hidden = false;
   } catch (err) { /* never let the reporter break the thing it reports on */ }
 }
 
@@ -541,9 +548,29 @@ function render(grid) {
   gridEl.innerHTML = `${thead}<tbody>${rows}</tbody>`;
 }
 
+/** Human label for a port, falling back to the raw code. */
+function labelFor(list, port) {
+  const hit = (list || []).find((entry) => entry.port === port);
+  return hit && hit.name ? `${hit.name} (${port})` : port;
+}
+
+/**
+ * Switch a destination to a source.
+ *
+ * The direct SET is tried first, so this needs no changing if a host ever
+ * routes app-initiated calls to the instance holding the device connection.
+ * Today they reach a different one, which cannot see the device at all, so the
+ * fallback asks the conversation to perform the switch: Claude runs SET
+ * through the connected instance and its fresh xpoint result draws the
+ * updated grid. The click still switches -- by a longer road.
+ */
 async function switchRoute(destPort, srcPort) {
   if (busy) return;
   busy = true;
+
+  const destLabel = labelFor(lastGrid && lastGrid.destinations, destPort);
+  const srcLabel = srcPort === '0' ? 'Disconnect' : labelFor(lastGrid && lastGrid.sources, srcPort);
+
   try {
     await callTool('SET', {
       nodepath: `${XP_NODE}/${destPort}`,
@@ -554,8 +581,32 @@ async function switchRoute(destPort, srcPort) {
     // (e.g. two outputs sharing one input on the crosspoint chip), so the
     // refresh after a switch must re-read SWITCHABLE, not just routing.
     await refresh();
-  } catch (err) {
-    setBanner(err.message, { stale: true });
+    setStatus(`Switched ${destLabel} to ${srcLabel}`);
+  } catch (directError) {
+    setStatus(`Asking Claude to switch ${destLabel}…`);
+    try {
+      // Port codes as well as names: the model needs the exact SET values,
+      // and the names alone are ambiguous.
+      await app.sendMessage({
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text:
+              `Set ${XP_NODE}/${destPort}.ConnectedSource to ${srcPort} ` +
+              `(switch ${destLabel} to ${srcLabel}), then run xpoint to show the result.`,
+          },
+        ],
+      });
+      setStatus(`Requested: ${destLabel} to ${srcLabel}`);
+      stage(`switch requested via chat (direct SET unavailable: ${directError.message})`);
+    } catch (askError) {
+      setBanner(
+        `Could not switch ${destLabel}: ${directError.message}. ` +
+          `Asking Claude also failed: ${askError && askError.message ? askError.message : String(askError)}`,
+        { stale: true }
+      );
+    }
   } finally {
     busy = false;
   }
