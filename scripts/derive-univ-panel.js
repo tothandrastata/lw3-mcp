@@ -102,7 +102,11 @@ const RULES = [
   ],
 ];
 
-let html = readFileSync(SOURCE, 'utf8');
+// Normalised to LF first. This repo has core.autocrlf=true, so a checkout can
+// rewrite the source with CRLF, and every multi-line rule below would stop
+// matching -- failing the build over line endings rather than a real
+// divergence. The output is written LF; git applies its own policy on checkout.
+let html = readFileSync(SOURCE, 'utf8').replace(/\r\n/g, '\n');
 
 const unmatched = RULES.filter(([, find]) => !html.includes(find)).map(([label]) => label);
 if (unmatched.length) {

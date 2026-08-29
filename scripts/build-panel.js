@@ -76,7 +76,9 @@ const inlined = [
 // of this very document into the middle of the script. A replacer function is
 // handed the text verbatim.
 for (const { src: srcPath, out, model } of PANELS) {
-  const src = readFileSync(srcPath, 'utf8');
+  // LF-normalised for the same reason as derive-univ-panel.js: a CRLF checkout
+  // must not change what gets inlined.
+  const src = readFileSync(srcPath, 'utf8').replace(/\r\n/g, '\n');
   if (!src.includes(PLACEHOLDER)) {
     throw new Error(`${srcPath} is missing the ${PLACEHOLDER} marker`);
   }
