@@ -29,12 +29,22 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '1.6.0',
+        version: '1.6.1',
       },
       {
         capabilities: {
           tools: {},
           resources: {},
+          // Without this the host treats ui://lw3-mcp/xpoint as an ordinary
+          // resource and renders the tool's text instead of the panel. The
+          // ui:// resource and the tool's _meta.ui are not enough on their
+          // own — the extension has to be negotiated here, at initialize.
+          // Shape per the MCP Apps spec, 2026-01-26.
+          extensions: {
+            'io.modelcontextprotocol/ui': {
+              mimeTypes: ['text/html;profile=mcp-app'],
+            },
+          },
         },
       }
     );

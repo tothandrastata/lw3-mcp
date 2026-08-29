@@ -553,7 +553,8 @@ function showHostUnsupported() {
 
 async function initHandshake() {
   const initReply = request('ui/initialize', {
-    capabilities: {},
+    // Spec names this appCapabilities, not capabilities.
+    appCapabilities: {},
     clientInfo: { name: 'lw3-xpoint', version: '1.0.0' },
     protocolVersion: PROTOCOL_VERSION,
   });
