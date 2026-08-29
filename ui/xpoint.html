@@ -61,6 +61,19 @@
 
   #app { padding: 0.75rem; min-height: 7rem; box-sizing: border-box; }
 
+  /* Deliberately loud and hardcoded, exactly like the probe panel that did
+     render. It owes nothing to the theme variables, the host's sizing or the
+     transport, so it shows even when everything after it fails. Temporary:
+     remove once the panel is confirmed working. */
+  #stage {
+    background: #b00020;
+    color: #ffffff;
+    font: 12px/1.5 ui-monospace, Consolas, monospace;
+    padding: 0.5rem 0.75rem;
+    margin: -0.75rem -0.75rem 0.75rem;
+    word-break: break-word;
+  }
+
   .panel-header {
     display: flex;
     align-items: baseline;
@@ -164,6 +177,7 @@
 </head>
 <body>
 <div id="app">
+  <div id="stage">stage: static HTML rendered (JavaScript has not run)</div>
   <header class="panel-header">
     <h1>Video crosspoint</h1>
     <div id="status" class="status" aria-live="polite"></div>
@@ -504,6 +518,20 @@ async function fetchGrid() {
 // Rendering and interaction.
 // ---------------------------------------------------------------------
 
+/**
+ * Report progress where it cannot be missed.
+ *
+ * Four releases were spent unable to tell "the document never rendered" from
+ * "it rendered and failed silently". This says which, on screen, without
+ * needing the console or a frame selector.
+ */
+function stage(text) {
+  try {
+    const el = document.getElementById('stage');
+    if (el) el.textContent = 'stage: ' + text;
+  } catch (err) { /* never let the reporter break the thing it reports on */ }
+}
+
 const gridEl = document.getElementById('grid');
 const bannerEl = document.getElementById('banner');
 const statusEl = document.getElementById('status');
@@ -609,6 +637,7 @@ async function refresh() {
     const grid = await fetchGrid();
     lastGrid = grid;
     render(grid);
+    stage('rendered ' + grid.destinations.length + ' x ' + grid.sources.length + ' grid');
     const size = reportSize();
     hostLog(
       'rendered ' + grid.destinations.length + 'x' + grid.sources.length +
@@ -621,11 +650,13 @@ async function refresh() {
     // routed", which is a stronger and different claim than "the last
     // read failed".
     if (lastGrid) render(lastGrid);
+    stage('device read FAILED: ' + (err && err.message ? err.message : String(err)));
     setBanner(err.message, { stale: true });
   }
 }
 
 (async function main() {
+  stage('module evaluated; calling connect()');
   setStatus('Connecting…');
 
   let connected = false;
@@ -640,7 +671,12 @@ async function refresh() {
   // Before anything else, and whether or not the handshake worked. The old
   // order returned from the catch without ever reporting a size, so the very
   // message explaining the failure was rendered into a frame of zero height.
-  reportSize();
+  const size = reportSize();
+  stage(
+    connected
+      ? 'connect() OK; size ' + JSON.stringify(size) + '; reading device…'
+      : 'connect() FAILED: ' + failure
+  );
 
   if (!connected) {
     setStatus('Not connected');
