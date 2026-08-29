@@ -264,7 +264,16 @@ app.ontoolresult = (result) => {
   try {
     const grid = result && result.structuredContent;
     if (!grid || !grid.destinations || !grid.sources) return;
-    if (grid.connection) connection = grid.connection;
+    if (grid.connection) {
+      // A different device than this panel last saw: whatever password was
+      // entered for the old one is not this one's, and the instance's
+      // connection points somewhere else.
+      if (connection && connection.host !== grid.connection.host) {
+        devicePassword = null;
+        selfConnected = false;
+      }
+      connection = grid.connection;
+    }
     lastGrid = grid;
     hydrated = true;
     render(grid);
@@ -509,6 +518,21 @@ function labelFor(list, port) {
 async function connectSelf() {
   if (selfConnected) return true;
   if (!connection || !connection.host) return false;
+  // This panel's server instance is shared with every other panel, and it may
+  // still hold whichever device an earlier one opened. connect refuses while a
+  // connection exists ("Already connected"), so the panel would go on reading
+  // and switching the previous device -- silently, since the grid it drew came
+  // from the tool result and looks perfectly current.
+  //
+  // Dropping first is unconditional because the panel cannot tell what the
+  // instance is attached to: status reports a host, but parsing prose to decide
+  // whether to disconnect is a worse bet than one redundant reconnect.
+  try {
+    await callTool('disconnect', {});
+  } catch (notConnected) {
+    // "Not connected to any device" -- which is the state we wanted anyway.
+  }
+
   const args = { host: connection.host, port: connection.port };
   if (devicePassword) args.password = devicePassword;
   await callTool('connect', args);
