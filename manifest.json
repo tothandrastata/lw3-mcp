@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "lw3-mcp",
   "display_name": "Lightware LW3 Gateway",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "Discover and control Lightware devices over the LW3 protocol",
   "author": {
     "name": "Andras Toth",
@@ -67,14 +67,6 @@
     {
       "name": "MAN",
       "description": "Get manual/documentation for a property or method"
-    },
-    {
-      "name": "uiprobexp",
-      "description": "Diagnostic: render the crosspoint document from a minimal tool result"
-    },
-    {
-      "name": "uiprobebig",
-      "description": "Diagnostic: oversized variant of uiprobe, to test whether the host refuses large UI resources"
     },
     {
       "name": "uiprobe",

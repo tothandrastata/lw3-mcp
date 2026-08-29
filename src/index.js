@@ -32,10 +32,6 @@ const XPOINT_UI = 'ui://lw3-mcp/xpoint-panel-v2';
 // the wiring rather than the panel.
 const PROBE_UI = 'ui://lw3-mcp/probe';
 
-// The probe again, padded past the crosspoint panel's length and identical in
-// every other respect. It exists to answer one question: does this host refuse
-// to render a UI resource above some size?
-const PROBE_BIG_UI = 'ui://lw3-mcp/probe-big';
 
 /**
  * MCP Server for Lightware LW3 Protocol Gateway
@@ -46,7 +42,7 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '1.8.0',
+        version: '1.8.1',
       },
       {
         capabilities: {
@@ -256,26 +252,6 @@ class LW3MCPServer {
           },
         },
         {
-          name: 'uiprobexp',
-          description:
-            'Diagnostic: render the crosspoint panel document from a minimal tool result, to test whether the document or the tool result is at fault. Takes no arguments and does not touch the device.',
-          inputSchema: {
-            type: 'object',
-            properties: {},
-          },
-          _meta: { ui: { resourceUri: XPOINT_UI } },
-        },
-        {
-          name: 'uiprobebig',
-          description:
-            'Diagnostic: same panel as uiprobe but padded to a larger document, to test whether this host refuses oversized UI resources. Takes no arguments and does not touch the device.',
-          inputSchema: {
-            type: 'object',
-            properties: {},
-          },
-          _meta: { ui: { resourceUri: PROBE_BIG_UI } },
-        },
-        {
           name: 'uiprobe',
           description:
             'Diagnostic: render a minimal MCP Apps panel to check whether this host displays interactive UI at all. Takes no arguments and does not touch the device.',
@@ -304,7 +280,6 @@ class LW3MCPServer {
     const uiDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui');
     const uiPath = join(uiDir, 'xpoint.html');
     const probePath = join(uiDir, 'probe.html');
-    const probeBigPath = join(uiDir, 'probe-big.html');
 
     this.server.setRequestHandler(ListResourcesRequestSchema, async () => ({
       // Kept on one line: tests/manifest.test.js counts registered *tools* by
@@ -314,12 +289,11 @@ class LW3MCPServer {
       resources: [
         { uri: XPOINT_UI, name: 'Crosspoint panel', mimeType: 'text/html;profile=mcp-app' },
         { uri: PROBE_UI, name: 'MCP Apps probe', mimeType: 'text/html;profile=mcp-app' },
-        { uri: PROBE_BIG_UI, name: 'MCP Apps probe (padded)', mimeType: 'text/html;profile=mcp-app' },
       ],
     }));
 
     this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-      const files = { [XPOINT_UI]: uiPath, [PROBE_UI]: probePath, [PROBE_BIG_UI]: probeBigPath };
+      const files = { [XPOINT_UI]: uiPath, [PROBE_UI]: probePath };
       const file = files[request.params.uri];
       if (!file) {
         throw new Error(`Unknown resource: ${request.params.uri}`);
@@ -370,37 +344,6 @@ class LW3MCPServer {
 
           case 'discover':
             return await this.handleDiscover(args);
-
-          case 'uiprobexp':
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text:
-                    'Crosspoint document requested through a minimal tool result. You cannot ' +
-                    'see rendered MCP App panels, so do not state whether it appeared -- ask ' +
-                    'the user. A red "stage:" bar means the document is fine and the fault is ' +
-                    'in the xpoint tool result; no bar means the document itself is at fault. ' +
-                    'No device I/O was performed.',
-                },
-              ],
-              _meta: { ui: { resourceUri: XPOINT_UI } },
-            };
-
-          case 'uiprobebig':
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text:
-                    'Padded diagnostic panel requested. You cannot see rendered MCP App ' +
-                    'panels, so do not state whether it appeared -- ask the user. A red box ' +
-                    'means this host renders UI resources of this size; no box means it ' +
-                    'refuses them. No device I/O was performed.',
-                },
-              ],
-              _meta: { ui: { resourceUri: PROBE_BIG_UI } },
-            };
 
           case 'uiprobe':
             return {
@@ -594,6 +537,18 @@ class LW3MCPServer {
    * server.getClientCapabilities(), which exposes only params.capabilities — an
    * extension advertised in a sibling field would be invisible to it.
    */
+  /**
+   * Whether the connected host negotiated the MCP Apps extension.
+   *
+   * The same test describeClient() reports, hoisted out because it now decides
+   * what the xpoint tool puts into the conversation, not just what status says.
+   */
+  hostRendersApps() {
+    return this.clientInit
+      ? JSON.stringify(this.clientInit).includes('modelcontextprotocol/ui')
+      : false;
+  }
+
   describeClient() {
     const params = this.clientInit;
     if (!params) return 'Client: not recorded';
@@ -605,7 +560,7 @@ class LW3MCPServer {
     // The MCP Apps extension is advertised at initialize; the spec does not
     // guarantee where, so search the whole params object rather than one field.
     const raw = JSON.stringify(params);
-    const ui = raw.includes('modelcontextprotocol/ui')
+    const ui = this.hostRendersApps()
       ? 'yes'
       : /"ui"\s*:/.test(raw)
         ? 'possibly — a "ui" key is present, see raw below'
@@ -729,7 +684,18 @@ class LW3MCPServer {
     }
 
     const grid = buildGrid({ xpLines, videoLines, switchableLines });
-    let text = renderGridText(grid);
+
+    // The text rendering is the fallback for hosts that cannot draw the panel.
+    // Where the panel does draw, this text is a snapshot taken now while the
+    // panel goes on updating as the user clicks, so within a click or two the
+    // conversation is describing routing that is no longer current -- in more
+    // detail, and more confidently, than the panel it sits under. Say only what
+    // stays true and let the panel speak for the routing.
+    let text = this.hostRendersApps()
+      ? 'Video crosspoint panel opened. It shows the current routing, stays up to ' +
+        'date as it changes, and switches when a cell is clicked. Do not restate ' +
+        'the routing: it changes as the user clicks and any summary here goes stale.'
+      : renderGridText(grid);
 
     if (switchableErrors.length) {
       text +=

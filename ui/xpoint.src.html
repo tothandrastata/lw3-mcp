@@ -693,7 +693,7 @@ async function refresh() {
     const grid = await fetchGrid();
     lastGrid = grid;
     render(grid);
-    stage('rendered ' + grid.destinations.length + ' x ' + grid.sources.length + ' grid');
+    stage(null);
     const size = reportSize();
     hostLog(
       'rendered ' + grid.destinations.length + 'x' + grid.sources.length +

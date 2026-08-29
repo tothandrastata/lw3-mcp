@@ -26,7 +26,6 @@ export const REQUIRED_ENTRIES = [
   'src/transports/wss.js',
   'ui/xpoint.html',
   'ui/probe.html',
-  'ui/probe-big.html',
   'assets/icon.png',
   'node_modules/@modelcontextprotocol/sdk/package.json',
   'node_modules/multicast-dns/package.json',

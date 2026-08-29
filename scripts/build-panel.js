@@ -24,11 +24,6 @@ const SDK = join(
 const PANELS = [
   { src: join(ROOT, 'ui/xpoint.src.html'), out: join(ROOT, 'ui/xpoint.html') },
   { src: join(ROOT, 'ui/probe.src.html'), out: join(ROOT, 'ui/probe.html') },
-  // The same probe, padded past the crosspoint panel's size. The two panels
-  // differ in nothing but length, so if this one stops rendering the host has
-  // a size ceiling; if it renders, size is ruled out and the difference is in
-  // what the crosspoint panel's document contains.
-  { src: join(ROOT, 'ui/probe.src.html'), out: join(ROOT, 'ui/probe-big.html'), padTo: 360000 },
 ];
 const PLACEHOLDER = '/* __MCP_APPS_SDK__ */';
 
