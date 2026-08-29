@@ -55,7 +55,7 @@
     font: 13px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif;
   }
 
-  #app { padding: 0.75rem; }
+  #app { padding: 0.75rem; min-height: 7rem; box-sizing: border-box; }
 
   .panel-header {
     display: flex;
@@ -572,7 +572,35 @@ async function initHandshake() {
   }
 
   notify('ui/notifications/initialized', {});
+  startSizeReporting();
   return true;
+}
+
+/**
+ * The host sizes this iframe from what the view reports. Without this the
+ * frame can be given zero height and the panel is invisible even though the
+ * document loaded and every handshake step succeeded -- which is the first
+ * cause the MCP Apps troubleshooting guide lists for an invisible app.
+ */
+function startSizeReporting() {
+  let lastW = -1;
+  let lastH = -1;
+  const report = () => {
+    const width = Math.ceil(document.documentElement.scrollWidth);
+    const height = Math.ceil(document.documentElement.scrollHeight);
+    // Renders are frequent (every poll); the host only needs the changes.
+    if (width === lastW && height === lastH) return;
+    lastW = width;
+    lastH = height;
+    notify('ui/notifications/size-changed', { width, height });
+  };
+  report();
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(report).observe(document.body);
+  } else {
+    // Older webview: fall back to reporting alongside the poll.
+    setInterval(report, POLL_MS);
+  }
 }
 
 (async function main() {
