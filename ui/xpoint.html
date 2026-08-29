@@ -559,7 +559,12 @@ async function initHandshake() {
   });
   const timeout = new Promise((resolve) => setTimeout(() => resolve(undefined), INIT_TIMEOUT_MS));
 
-  const result = await Promise.race([initReply.then((r) => ({ ok: true, r })), timeout]);
+  // The rejection handler matters: request() now times out on its own, and
+  // without it that rejection is unhandled once this race has already settled.
+  const result = await Promise.race([
+    initReply.then((r) => ({ ok: true, r }), () => undefined),
+    timeout,
+  ]);
   if (!result || !result.ok) {
     showHostUnsupported();
     return false;
