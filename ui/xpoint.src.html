@@ -146,6 +146,16 @@
 
   td.cell { min-width: 2.75rem; color: var(--disabled-fg); }
 
+  /* Port names are long ("Welcome Screen") and the frame is narrow, so a
+     single-line header pushes most of the grid out of view behind a scrollbar.
+     Wrapping trades header height, of which there is plenty, for width, of
+     which there is not. */
+  thead th {
+    white-space: normal;
+    word-break: break-word;
+    max-width: 5.5rem;
+  }
+
   td.cell[data-dest] {
     cursor: pointer;
     color: var(--fg);
@@ -598,8 +608,11 @@ async function switchRoute(destPort, srcPort) {
           },
         ],
       });
-      setStatus(`Requested: ${destLabel} to ${srcLabel}`);
-      stage(`switch requested via chat (direct SET unavailable: ${directError.message})`);
+      // Nothing failed from the user's point of view: the switch was asked for
+      // and is on its way. Going via the chat is how this panel always works,
+      // not an incident, so it does not belong in the red bar.
+      setStatus(`Requested: ${destLabel} to ${srcLabel} — see the chat`);
+      stage(null);
     } catch (askError) {
       setBanner(
         `Could not switch ${destLabel}: ${directError.message}. ` +
