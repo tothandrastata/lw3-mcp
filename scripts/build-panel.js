@@ -21,8 +21,10 @@ const SDK = join(
   ROOT,
   'node_modules/@modelcontextprotocol/ext-apps/dist/src/app-with-deps.js'
 );
-const SRC = join(ROOT, 'ui/xpoint.src.html');
-const OUT = join(ROOT, 'ui/xpoint.html');
+const PANELS = [
+  { src: join(ROOT, 'ui/xpoint.src.html'), out: join(ROOT, 'ui/xpoint.html') },
+  { src: join(ROOT, 'ui/probe.src.html'), out: join(ROOT, 'ui/probe.html') },
+];
 const PLACEHOLDER = '/* __MCP_APPS_SDK__ */';
 
 /** Names the panel needs out of the SDK bundle. */
@@ -46,11 +48,6 @@ function bindingsFor(bundle, names) {
 }
 
 const bundle = readFileSync(SDK, 'utf8');
-const src = readFileSync(SRC, 'utf8');
-if (!src.includes(PLACEHOLDER)) {
-  throw new Error(`${SRC} is missing the ${PLACEHOLDER} marker`);
-}
-
 const bindings = bindingsFor(bundle, WANTED);
 const aliases = bindings
   .map(([name, local]) => `const ${name} = ${local};`)
@@ -69,12 +66,18 @@ const inlined = [
 // substitution patterns when the replacement is a plain string, splicing parts
 // of this very document into the middle of the script. A replacer function is
 // handed the text verbatim.
-writeFileSync(OUT, src.replace(PLACEHOLDER, () => inlined), 'utf8');
+for (const { src: srcPath, out } of PANELS) {
+  const src = readFileSync(srcPath, 'utf8');
+  if (!src.includes(PLACEHOLDER)) {
+    throw new Error(`${srcPath} is missing the ${PLACEHOLDER} marker`);
+  }
+  writeFileSync(out, src.replace(PLACEHOLDER, () => inlined), 'utf8');
+}
 
 const version = JSON.parse(
   readFileSync(join(ROOT, 'node_modules/@modelcontextprotocol/ext-apps/package.json'), 'utf8')
 ).version;
 console.log(
-  `[build-panel] ui/xpoint.html <- ui/xpoint.src.html + ext-apps@${version} ` +
+  `[build-panel] ${PANELS.length} panel(s) built from ext-apps@${version} ` +
     `(${bindings.map(([n, l]) => `${n}=${l}`).join(', ')})`
 );

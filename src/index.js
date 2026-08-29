@@ -29,7 +29,7 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '1.7.1',
+        version: '1.7.2',
       },
       {
         capabilities: {
@@ -239,6 +239,16 @@ class LW3MCPServer {
           },
         },
         {
+          name: 'uiprobe',
+          description:
+            'Diagnostic: render a minimal MCP Apps panel to check whether this host displays interactive UI at all. Takes no arguments and does not touch the device.',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+          },
+          _meta: { ui: { resourceUri: PROBE_UI } },
+        },
+        {
           name: 'xpoint',
           description:
             'Show the video crosspoint: which source is routed to each destination, and which sources each destination can switch to',
@@ -254,26 +264,33 @@ class LW3MCPServer {
     // Serve the crosspoint panel to hosts that support the MCP Apps UI
     // extension. Read from disk on every request rather than cached at
     // startup, so the bundle's on-disk HTML is always what gets served.
-    const uiPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'xpoint.html');
+    const uiDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui');
+    const uiPath = join(uiDir, 'xpoint.html');
+    const probePath = join(uiDir, 'probe.html');
 
     this.server.setRequestHandler(ListResourcesRequestSchema, async () => ({
       // Kept on one line: tests/manifest.test.js counts registered *tools* by
       // matching a 10-space-indented `name: '...'`, and this resource's own
       // `name` field would otherwise land at that same indent and be
       // miscounted as a 12th tool.
-      resources: [{ uri: XPOINT_UI, name: 'Crosspoint panel', mimeType: 'text/html;profile=mcp-app' }],
+      resources: [
+        { uri: XPOINT_UI, name: 'Crosspoint panel', mimeType: 'text/html;profile=mcp-app' },
+        { uri: PROBE_UI, name: 'MCP Apps probe', mimeType: 'text/html;profile=mcp-app' },
+      ],
     }));
 
     this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-      if (request.params.uri !== XPOINT_UI) {
+      const files = { [XPOINT_UI]: uiPath, [PROBE_UI]: probePath };
+      const file = files[request.params.uri];
+      if (!file) {
         throw new Error(`Unknown resource: ${request.params.uri}`);
       }
       return {
         contents: [
           {
-            uri: XPOINT_UI,
+            uri: request.params.uri,
             mimeType: 'text/html;profile=mcp-app',
-            text: readFileSync(uiPath, 'utf8'),
+            text: readFileSync(file, 'utf8'),
           },
         ],
       };
@@ -314,6 +331,20 @@ class LW3MCPServer {
 
           case 'discover':
             return await this.handleDiscover(args);
+
+          case 'uiprobe':
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text:
+                    'Diagnostic panel requested. A host that supports MCP Apps shows a red ' +
+                    '"MCP Apps probe" box above this text; one that does not shows only this ' +
+                    'line. The panel performs no device I/O.',
+                },
+              ],
+              _meta: { ui: { resourceUri: PROBE_UI } },
+            };
 
           case 'xpoint':
             return await this.handleXpoint();
