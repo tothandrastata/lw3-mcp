@@ -37,9 +37,35 @@ class LW3MCPServer {
     this.server = new Server(
       {
         name: 'lw3-mcp',
-        version: '2.0.0',
+        version: '2.1.0',
       },
       {
+        // Goes into the host's system prompt, unlike tool descriptions, which
+        // some hosts defer: they list MCP tools by name and fetch schemas only
+        // on demand, so a tool can be effectively invisible until the user
+        // names the server. Instructions arrive regardless, which makes this
+        // the only reliable place to say "these tools exist, use them".
+        //
+        // Deliberately "prefer" rather than "never suggest": someone debugging
+        // their own network may legitimately ask for a shell command, and an
+        // absolute prohibition would misfire there.
+        instructions: [
+          'This server talks to Lightware AV hardware on the local network over LW3.',
+          '',
+          'When the user asks about AV or Lightware equipment — devices on the network,',
+          'a matrix, extender, switcher, transmitter or receiver, or a specific unit by',
+          'model, room or serial number — call "discover" first. Prefer it over',
+          'suggesting the user run nmap, avahi, dns-sd or similar by hand; it is',
+          'read-only, needs no arguments, and reports model, serial, address and',
+          'hostname for everything it finds.',
+          '',
+          'Then "connect" to a device by address, and the LW3 commands (GET, SET,',
+          'GETALL, GETROOT, CALL, MAN) to read and change it. "xpoint" shows video',
+          'routing as an interactive grid where the host supports it.',
+          '',
+          'One device at a time: the connection lasts the session and must be closed',
+          'with "disconnect" before connecting elsewhere.',
+        ].join('\n'),
         capabilities: {
           tools: {},
           resources: {},
@@ -92,7 +118,10 @@ class LW3MCPServer {
       tools: [
         {
           name: 'connect',
-          description: 'Connect to a Lightware device using LW3 protocol',
+          description:
+            'Open the LW3 connection to one Lightware device, by IP address or hostname. ' +
+            'Use after "discover", or directly when the address is already known. The ' +
+            'connection lasts the session; only one device at a time.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -240,7 +269,11 @@ class LW3MCPServer {
         },
         {
           name: 'discover',
-          description: 'Discover Lightware devices on the local network using mDNS',
+          description:
+            'List Lightware AV devices on the local network via mDNS — UCX, UBEX, TPN/GVN MMU, ' +
+            'MX2/MMX2 matrices, HDBaseT and HDMI extenders. Use for any "what devices are on ' +
+            'the network", inventory, audit, or "find device X" request. Read-only, takes no ' +
+            'arguments, and safe to call speculatively.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -255,7 +288,12 @@ class LW3MCPServer {
         {
           name: 'xpoint',
           description:
-            'Show the video crosspoint: which source is routed to each destination, and which sources each destination can switch to. Detects the device family from what the crosspoint publishes, so it covers I1/O1 devices and stream-named ones such as TPN-MMU.',
+            'Show the video crosspoint: which source is routed to each destination, and which ' +
+            'sources each destination can switch to. Use for any question about routing, ' +
+            '"what is on output N", switching a source, or disconnecting an output. Renders an ' +
+            'interactive grid where the host supports it. Detects the device family from what ' +
+            'the crosspoint publishes, so it covers I1/O1 devices and stream-named ones such ' +
+            'as TPN-MMU.',
           inputSchema: {
             type: 'object',
             properties: {},

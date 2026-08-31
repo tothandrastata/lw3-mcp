@@ -47,3 +47,35 @@ test('MCP Server constructor version tracks package.json', () => {
   assert.equal(match[1], pkg.version,
     `src/index.js hardcodes Server version '${match[1]}'; update that literal to match package.json's "${pkg.version}"`);
 });
+
+test('the server sends instructions naming discover as the entry point', () => {
+  // Instructions reach the host's system prompt. Tool descriptions do not always:
+  // some hosts list MCP tools by name and fetch schemas only on demand, so a tool
+  // can be invisible until the user names the server — which is exactly what a
+  // user reported. This is the one place that is always read.
+  const match = serverSource.match(/instructions:\s*\[([\s\S]*?)\]\.join/);
+  assert.ok(match, 'the Server options must carry an instructions array');
+
+  const text = match[1];
+  assert.match(text, /discover/, 'instructions must name the discovery tool');
+  assert.match(text, /read-only/i, 'saying it is read-only is what lowers the bar to calling it');
+  assert.match(text, /nmap/i, 'the failure mode worth naming is suggesting a manual scan instead');
+
+  // "prefer", not "never": someone debugging their own network may legitimately
+  // want a shell command, and an absolute prohibition misfires there.
+  assert.match(text, /Prefer it over/, 'the steer should be a preference, not a prohibition');
+  assert.doesNotMatch(text, /never suggest/i);
+});
+
+test('the discovery tool description carries the words users actually type', () => {
+  const at = serverSource.indexOf("name: 'discover'");
+  assert.ok(at > 0, 'discover must be registered');
+  // Adjacent string literals are joined first: the description is wrapped across
+  // source lines, so phrases that read contiguously in the shipped text are split
+  // by `' + '` in the file.
+  const description = serverSource.slice(at, at + 900).replace(/'\s*\+\s*'/g, '');
+
+  for (const phrase of ['on the network', 'inventory', 'Read-only', 'no arguments']) {
+    assert.ok(description.includes(phrase), `discover's description should mention "${phrase}"`);
+  }
+});

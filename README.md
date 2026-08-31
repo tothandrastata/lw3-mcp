@@ -100,6 +100,24 @@ Bump it in **both** `package.json` and `manifest.json`. `npm test` fails if they
 
 Register it in `src/index.js` (the `ListToolsRequestSchema` entry, the `switch` case, and the handler), then add it to the `tools` array in `manifest.json`. The test suite asserts parity in both directions and will fail until the manifest catches up.
 
+## How the host learns to use this
+
+The server returns an `instructions` block at `initialize`, which the host puts in its
+system prompt. That matters because tool descriptions are not always read: some hosts
+list MCP tools by name and fetch their schemas only on demand, so a tool can be
+effectively invisible until the user names the server. One user found exactly that — the
+gateway was installed and working, and the assistant suggested running `nmap` instead of
+calling `discover`, because at that point it had no idea `discover` existed.
+
+The instructions name `discover` as the entry point and say it is read-only and
+argument-free, which is what makes calling it speculatively reasonable. They *prefer*
+`discover` over manual scans rather than forbidding them, because someone debugging their
+own network may legitimately want a shell command.
+
+Tool descriptions carry the words people actually type — "what devices are on the
+network", inventory, audit, "find device X" — alongside the product names. Both are
+pinned by tests, since a well-meaning tidy-up of either would quietly undo the fix.
+
 ## Available tools
 
 Eleven tools. All the LW3 commands take **separated** `nodepath` and `property`/`method` parameters rather than one combined path string, so a value returned by `GETALL` can be passed straight into `GET` or `CALL`.
